@@ -1,0 +1,16 @@
+services:
+  yukari:
+    build: .
+    depends_on:
+      - redis
+    environment:
+      YUKARI_TIMEZONE: ${YUKARI_TIMEZONE:-Asia/Jakarta}
+      YUKARI_SQL_DIR: ${YUKARI_SQL_DIR:-data/sql}
+      DATABASE_DSN: ${DATABASE_DSN:-}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      YUKARI_QUEUE_NAME: ${YUKARI_QUEUE_NAME:-birthday_email_jobs}
+
+  redis:
+    image: redis:7-alpine
