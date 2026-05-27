@@ -2,7 +2,7 @@
 
 Birthday email reader for Kyou.id.
 
-Yukari reads Hanayo/Kyou MySQL using SQL files from `data/sql`, builds complete birthday email job payloads, and pushes them to Redis for Makoto to send. Birthday recipients must have a non-empty email and `email_verified_at IS NOT NULL`.
+Yukari reads Hanayo/Kyou MySQL using SQL files from `data/sql`, builds complete birthday email job payloads, and pushes them to Redis for Makoto to send. Birthday recipients must have a non-empty email and `email_verified_at IS NOT NULL`. Wishlist and FYP payloads include public CDN image URLs from the `images` table when available.
 
 ## Flow
 

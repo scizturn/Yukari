@@ -11,17 +11,30 @@ type User struct {
 }
 
 type WishlistItem struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	URL   string `json:"url"`
-	Price int    `json:"price"`
+	ID           string     `json:"id"`
+	Name         string     `json:"name"`
+	URL          string     `json:"url"`
+	ImageURL     string     `json:"image_url"`
+	Price        int        `json:"price"`
+	Status       string     `json:"status"`
+	Manufacturer string     `json:"manufacturer"`
+	SeriesName   string     `json:"series_name"`
+	PODeadline   *time.Time `json:"po_deadline,omitempty"`
+	POReleaseAt  *time.Time `json:"po_release_at,omitempty"`
 }
 
 type FYPItem struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Kind     string `json:"kind"`
-	SeriesID string `json:"series_id"`
+	ID           string     `json:"id"`
+	Name         string     `json:"name"`
+	Kind         string     `json:"kind"`
+	SeriesID     string     `json:"series_id"`
+	ImageURL     string     `json:"image_url"`
+	Price        int        `json:"price"`
+	Status       string     `json:"status"`
+	Manufacturer string     `json:"manufacturer"`
+	SeriesName   string     `json:"series_name"`
+	PODeadline   *time.Time `json:"po_deadline,omitempty"`
+	POReleaseAt  *time.Time `json:"po_release_at,omitempty"`
 }
 
 type BirthdayJob struct {

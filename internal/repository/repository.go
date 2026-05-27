@@ -34,7 +34,7 @@ func (s *StubStore) BirthdayUsers(_ context.Context, monthDay string) ([]domain.
 }
 
 func (s *StubStore) Wishlist(context.Context, string) ([]domain.WishlistItem, error) {
-	return []domain.WishlistItem{{ID: "wish-1", Name: "Birthday Pick", URL: "/items/1", Price: 0}}, nil
+	return []domain.WishlistItem{{ID: "wish-1", Name: "Birthday Pick", URL: "https://kyou.id/items/1/", Price: 0}}, nil
 }
 
 func (s *StubStore) FYP(context.Context, string) ([]domain.FYPItem, error) {

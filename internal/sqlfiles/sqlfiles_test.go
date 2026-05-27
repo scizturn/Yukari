@@ -3,6 +3,7 @@ package sqlfiles
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -25,5 +26,104 @@ func TestLoaderRejectsUnsafeNames(t *testing.T) {
 	_, err := NewLoader(t.TempDir()).Read("../secret")
 	if err == nil {
 		t.Fatal("expected unsafe name error")
+	}
+}
+
+func TestBirthdayItemQueriesIncludeImageURLs(t *testing.T) {
+	loader := NewLoader("../../data/sql")
+	for _, name := range []string{"wishlist_items", "fyp_items", "popular_items"} {
+		query, err := loader.Read(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		for _, want := range []string{"https://kyoucdn.id/", "images", "image_url"} {
+			if !strings.Contains(query, want) {
+				t.Fatalf("expected %s query to contain %q, got %q", name, want, query)
+			}
+		}
+	}
+}
+
+func TestBirthdayItemQueriesFilterOrderableNonAdultItems(t *testing.T) {
+	loader := NewLoader("../../data/sql")
+	for _, name := range []string{"wishlist_items", "fyp_items", "popular_items"} {
+		query, err := loader.Read(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		for _, want := range []string{
+			"i.is_available = 1",
+			"i.stock > 0",
+			"COALESCE(i.isAdult, 0) = 0",
+			"(ip.po_deadline IS NULL OR ip.po_deadline >= CURRENT_DATE)",
+		} {
+			if !strings.Contains(query, want) {
+				t.Fatalf("expected %s query to contain %q, got %q", name, want, query)
+			}
+		}
+	}
+}
+
+func TestBirthdayItemQueriesShapeWishlistAndRecommendations(t *testing.T) {
+	loader := NewLoader("../../data/sql")
+
+	wishlistQuery, err := loader.Read("wishlist_items")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"i.name AS name",
+		"CONCAT('https://kyou.id/items/', i.item_id, '/') AS url",
+		"ip.price",
+		"i.status",
+		"m.name AS manufacturer",
+		"s.name AS series_name",
+		"ip.po_deadline",
+		"ip.po_release_date",
+		"ORDER BY i.view_count DESC",
+		"LIMIT 1",
+	} {
+		if !strings.Contains(wishlistQuery, want) {
+			t.Fatalf("expected wishlist query to contain %q, got %q", want, wishlistQuery)
+		}
+	}
+
+	fypQuery, err := loader.Read("fyp_items")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"i.name AS name",
+		"ip.price",
+		"i.status",
+		"m.name AS manufacturer",
+		"s.name AS series_name",
+		"series_rank <= 3",
+		"item_rank = 1",
+		"LIMIT 3",
+	} {
+		if !strings.Contains(fypQuery, want) {
+			t.Fatalf("expected fyp query to contain %q, got %q", want, fypQuery)
+		}
+	}
+	for _, unwanted := range []string{"ranked.kind = 'character'", "ranked.kind = 'series'"} {
+		if strings.Contains(fypQuery, unwanted) {
+			t.Fatalf("expected fyp query not to contain %q, got %q", unwanted, fypQuery)
+		}
+	}
+
+	popularQuery, err := loader.Read("popular_items")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"ip.price",
+		"i.status",
+		"m.name AS manufacturer",
+		"LIMIT 3",
+	} {
+		if !strings.Contains(popularQuery, want) {
+			t.Fatalf("expected popular query to contain %q, got %q", want, popularQuery)
+		}
 	}
 }

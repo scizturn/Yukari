@@ -70,9 +70,13 @@ func (s *MySQLStore) Wishlist(ctx context.Context, userID string) ([]domain.Wish
 	var items []domain.WishlistItem
 	for rows.Next() {
 		var item domain.WishlistItem
-		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.Price); err != nil {
+		var poDeadline sql.NullTime
+		var poReleaseAt sql.NullTime
+		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.ImageURL, &item.Price, &item.Status, &item.Manufacturer, &item.SeriesName, &poDeadline, &poReleaseAt); err != nil {
 			return nil, err
 		}
+		item.PODeadline = timePtr(poDeadline)
+		item.POReleaseAt = timePtr(poReleaseAt)
 		items = append(items, item)
 	}
 	return items, rows.Err()
@@ -102,10 +106,21 @@ func (s *MySQLStore) fypRows(ctx context.Context, query string, args ...any) ([]
 	var items []domain.FYPItem
 	for rows.Next() {
 		var item domain.FYPItem
-		if err := rows.Scan(&item.ID, &item.Name, &item.Kind, &item.SeriesID); err != nil {
+		var poDeadline sql.NullTime
+		var poReleaseAt sql.NullTime
+		if err := rows.Scan(&item.ID, &item.Name, &item.Kind, &item.SeriesID, &item.ImageURL, &item.Price, &item.Status, &item.Manufacturer, &item.SeriesName, &poDeadline, &poReleaseAt); err != nil {
 			return nil, err
 		}
+		item.PODeadline = timePtr(poDeadline)
+		item.POReleaseAt = timePtr(poReleaseAt)
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func timePtr(value sql.NullTime) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	return &value.Time
 }
