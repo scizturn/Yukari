@@ -42,8 +42,17 @@ type BirthdayJob struct {
 	UserID        string         `json:"user_id"`
 	Date          time.Time      `json:"birthday_date"`
 	User          User           `json:"user"`
+	VoucherCode   string         `json:"voucher_code,omitempty"`
+	VoucherID     int64          `json:"voucher_id,omitempty"`
 	WishlistItems []WishlistItem `json:"wishlist_items"`
 	FYPItems      []FYPItem      `json:"fyp_items"`
 	PopularItems  []FYPItem      `json:"popular_items"`
 	Attempt       int            `json:"attempt"`
+}
+
+type Voucher struct {
+	ID        int64
+	Code      string
+	Existed   bool
+	CreatedAt time.Time
 }

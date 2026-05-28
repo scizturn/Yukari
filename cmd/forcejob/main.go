@@ -54,11 +54,34 @@ func main() {
 		log.Fatalf("read popular: %v", err)
 	}
 
+	voucherCfg, err := repository.LoadBirthdayVoucherConfig(cfg.VoucherConfigPath)
+	if err != nil {
+		log.Fatalf("load voucher config: %v", err)
+	}
+	voucherCreator, err := repository.OpenMySQLVoucherCreator(cfg.DatabaseDSN, voucherCfg, cfg.VoucherCodeSecret)
+	if err != nil {
+		log.Fatalf("open voucher creator: %v", err)
+	}
+	defer func() {
+		if err := voucherCreator.Close(); err != nil {
+			log.Printf("voucher db close failed: %v", err)
+		}
+	}()
+	voucher, err := voucherCreator.CreateBirthdayVoucher(ctx, user, now, voucherItemIDs(wishlist, fyp))
+	if err != nil {
+		log.Fatalf("create voucher: %v", err)
+	}
+	if voucher.Existed {
+		log.Fatalf("voucher already exists for this user/year: voucher_id=%d voucher_code=%s; refusing to enqueue duplicate email", voucher.ID, voucher.Code)
+	}
+
 	job := domain.BirthdayJob{
 		ID:            fmt.Sprintf("force-birthday-%s-user-%s", now.Format("2006-01-02-150405"), user.ID),
 		UserID:        user.ID,
 		Date:          now,
 		User:          user,
+		VoucherCode:   voucher.Code,
+		VoucherID:     voucher.ID,
 		WishlistItems: wishlist,
 		FYPItems:      fyp,
 		PopularItems:  popular,
@@ -75,10 +98,12 @@ func main() {
 		log.Fatalf("enqueue force job: %v", err)
 	}
 
-	log.Printf("forced birthday job enqueued: queue=%s job_id=%s user_id=%s name=%q email=%s original_active=%t forced_active=%t wishlist=%d fyp=%d popular=%d",
+	log.Printf("forced birthday job enqueued: queue=%s job_id=%s user_id=%s voucher_id=%d voucher_code=%s name=%q email=%s original_active=%t forced_active=%t wishlist=%d fyp=%d popular=%d",
 		cfg.QueueName,
 		job.ID,
 		user.ID,
+		voucher.ID,
+		voucher.Code,
 		user.Name,
 		maskEmail(user.Email),
 		originalActive,
@@ -87,6 +112,28 @@ func main() {
 		len(fyp),
 		len(popular),
 	)
+}
+
+func voucherItemIDs(wishlist []domain.WishlistItem, fyp []domain.FYPItem) []string {
+	seen := make(map[string]struct{}, len(wishlist)+len(fyp))
+	itemIDs := make([]string, 0, len(wishlist)+len(fyp))
+	add := func(id string) {
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		itemIDs = append(itemIDs, id)
+	}
+	for _, item := range wishlist {
+		add(item.ID)
+	}
+	for _, item := range fyp {
+		add(item.ID)
+	}
+	return itemIDs
 }
 
 func findUser(ctx context.Context, dsn string, needle string) (domain.User, bool, error) {

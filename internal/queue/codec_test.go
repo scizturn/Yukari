@@ -12,9 +12,11 @@ func TestEncodeBirthdayJobIncludesItemCommerceFields(t *testing.T) {
 	deadline := time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC)
 	releaseDate := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	job := domain.BirthdayJob{
-		ID:     "birthday-2026-05-21-user-123",
-		UserID: "123",
-		Date:   time.Date(2026, 5, 21, 0, 0, 0, 0, time.UTC),
+		ID:          "birthday-2026-05-21-user-123",
+		UserID:      "123",
+		Date:        time.Date(2026, 5, 21, 0, 0, 0, 0, time.UTC),
+		VoucherCode: "BIRTHDAY_123_20260521",
+		VoucherID:   54,
 		WishlistItems: []domain.WishlistItem{{
 			ID:           "wish-1",
 			Name:         "Ready Figure",
@@ -57,6 +59,8 @@ func TestEncodeBirthdayJobIncludesItemCommerceFields(t *testing.T) {
 		`"status":"PO"`,
 		`"manufacturer":"Good Smile Company"`,
 		`"series_name":"Honkai: Star Rail"`,
+		`"voucher_code":"BIRTHDAY_123_20260521"`,
+		`"voucher_id":54`,
 	} {
 		if !strings.Contains(payload, want) {
 			t.Fatalf("expected payload to contain %q, got %s", want, payload)

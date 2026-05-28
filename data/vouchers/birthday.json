@@ -1,0 +1,41 @@
+{
+  "name": "BIRTHDAY",
+  "description": null,
+  "type": "discount_percent",
+  "amount": "15",
+  "max_discount": "150000",
+  "min_purchase": "0",
+  "distribution": "manual",
+  "requires_claim": 1,
+  "is_active": 1,
+  "usage_limit_total": null,
+  "max_claim_total": "1",
+  "usage_limit_per_user": "1",
+  "claim_animation": "envelope",
+  "duration_days": 14,
+  "pricing_voucher_id": "53",
+  "rules": [
+    {
+      "type": "item_remaining_life_min",
+      "operator": "include",
+      "value": "90"
+    },
+    {
+      "type": "item_age_min",
+      "operator": "include",
+      "value": "30"
+    }
+  ],
+  "business_rules": [
+    {
+      "type": "gp_ratio_min",
+      "operator": "include",
+      "value": "40"
+    },
+    {
+      "type": "stock_min",
+      "operator": "include",
+      "value": "3"
+    }
+  ]
+}

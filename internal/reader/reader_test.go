@@ -41,12 +41,91 @@ func TestReaderBuildsFullBirthdayJob(t *testing.T) {
 	}
 }
 
+func TestReaderCreatesVoucherBeforeEnqueue(t *testing.T) {
+	now := time.Date(2026, 5, 21, 7, 0, 0, 0, time.UTC)
+	store := &fakeStore{
+		users: []domain.User{{
+			ID:       "123",
+			Name:     "Garvin",
+			Email:    "garvin@example.test",
+			Birthday: now,
+			IsActive: true,
+		}},
+		wishlist: []domain.WishlistItem{{ID: "1001", Name: "Figure"}},
+		fyp:      []domain.FYPItem{{ID: "1002", Name: "Chara"}},
+		popular:  []domain.FYPItem{{ID: "popular-1", Name: "Popular"}},
+	}
+	queue := &fakeQueue{}
+	vouchers := &fakeVoucherCreator{
+		voucher: domain.Voucher{ID: 54, Code: "BIRTHDAY_123_20260521"},
+	}
+
+	count, err := NewWithVoucherCreator(store, queue, vouchers).Run(context.Background(), now)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one job, got %d", count)
+	}
+	if vouchers.userID != "123" {
+		t.Fatalf("expected voucher for user 123, got %q", vouchers.userID)
+	}
+	if len(vouchers.itemIDs) != 2 || vouchers.itemIDs[0] != "1001" || vouchers.itemIDs[1] != "1002" {
+		t.Fatalf("expected wishlist and fyp item ids, got %#v", vouchers.itemIDs)
+	}
+	if queue.jobs[0].VoucherCode != "BIRTHDAY_123_20260521" || queue.jobs[0].VoucherID != 54 {
+		t.Fatalf("expected voucher fields in job, got %#v", queue.jobs[0])
+	}
+}
+
+func TestReaderSkipsExistingYearlyVoucher(t *testing.T) {
+	now := time.Date(2026, 5, 21, 7, 0, 0, 0, time.UTC)
+	store := &fakeStore{
+		users: []domain.User{{
+			ID:       "123",
+			Name:     "Garvin",
+			Email:    "garvin@example.test",
+			Birthday: now,
+			IsActive: true,
+		}},
+	}
+	queue := &fakeQueue{}
+	vouchers := &fakeVoucherCreator{
+		voucher: domain.Voucher{ID: 54, Code: "RANDOMCODE123456", Existed: true},
+	}
+
+	count, err := NewWithVoucherCreator(store, queue, vouchers).Run(context.Background(), now)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no enqueued jobs, got %d", count)
+	}
+	if len(queue.jobs) != 0 {
+		t.Fatalf("expected queue to stay empty, got %#v", queue.jobs)
+	}
+}
+
 type fakeStore struct {
 	users     []domain.User
 	wishlist  []domain.WishlistItem
 	fyp       []domain.FYPItem
 	popular   []domain.FYPItem
 	converted bool
+}
+
+type fakeVoucherCreator struct {
+	voucher domain.Voucher
+	userID  string
+	itemIDs []string
+}
+
+func (c *fakeVoucherCreator) CreateBirthdayVoucher(_ context.Context, user domain.User, _ time.Time, itemIDs []string) (domain.Voucher, error) {
+	c.userID = user.ID
+	c.itemIDs = append([]string(nil), itemIDs...)
+	return c.voucher, nil
 }
 
 func (s *fakeStore) BirthdayUsers(context.Context, string) ([]domain.User, error) {

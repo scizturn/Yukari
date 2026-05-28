@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -35,7 +36,19 @@ func main() {
 		}
 	}()
 
-	count, err := reader.New(store, redisQueue).Run(ctx, now)
+	voucherCreator, err := buildVoucherCreator(cfg)
+	if err != nil {
+		log.Fatalf("build voucher creator: %v", err)
+	}
+	if voucherCreator != nil {
+		defer func() {
+			if err := voucherCreator.Close(); err != nil {
+				log.Printf("voucher db close failed: %v", err)
+			}
+		}()
+	}
+
+	count, err := reader.NewWithVoucherCreator(store, redisQueue, voucherCreator).Run(ctx, now)
 	if err != nil {
 		log.Fatalf("reader failed: %v", err)
 	}
@@ -48,4 +61,24 @@ func buildStore(cfg config.Config, now time.Time) (reader.Store, error) {
 		return repository.NewStubStore(now), nil
 	}
 	return repository.OpenMySQLStore(cfg.DatabaseDSN, sqlfiles.NewLoader(cfg.SQLDir))
+}
+
+func buildVoucherCreator(cfg config.Config) (*repository.MySQLVoucherCreator, error) {
+	voucherCfg, err := repository.LoadBirthdayVoucherConfig(cfg.VoucherConfigPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("voucher config %s not found; Yukari will enqueue jobs without creating vouchers", cfg.VoucherConfigPath)
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !voucherCfg.PricingVoucherID.Valid && strings.TrimSpace(voucherCfg.PricingVoucherCode) == "" {
+		log.Printf("voucher config %s has no pricing_voucher_id or pricing_voucher_code; Yukari will enqueue jobs without creating vouchers", cfg.VoucherConfigPath)
+		return nil, nil
+	}
+	if strings.TrimSpace(cfg.DatabaseDSN) == "" {
+		log.Print("OLD_DATABASE_* is empty; Yukari will enqueue jobs without creating vouchers")
+		return nil, nil
+	}
+	return repository.OpenMySQLVoucherCreator(cfg.DatabaseDSN, voucherCfg, cfg.VoucherCodeSecret)
 }

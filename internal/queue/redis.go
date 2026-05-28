@@ -35,5 +35,5 @@ func (q *RedisQueue) Enqueue(ctx context.Context, job domain.BirthdayJob) error 
 	if err != nil {
 		return err
 	}
-	return q.client.LPush(ctx, q.name, payload).Err()
+	return q.client.RPush(ctx, q.name, payload).Err()
 }

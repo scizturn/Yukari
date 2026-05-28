@@ -20,13 +20,22 @@ type Queue interface {
 	Enqueue(ctx context.Context, job domain.BirthdayJob) error
 }
 
+type VoucherCreator interface {
+	CreateBirthdayVoucher(ctx context.Context, user domain.User, birthdayDate time.Time, itemIDs []string) (domain.Voucher, error)
+}
+
 type Reader struct {
-	store Store
-	queue Queue
+	store    Store
+	queue    Queue
+	vouchers VoucherCreator
 }
 
 func New(store Store, queue Queue) Reader {
 	return Reader{store: store, queue: queue}
+}
+
+func NewWithVoucherCreator(store Store, queue Queue, vouchers VoucherCreator) Reader {
+	return Reader{store: store, queue: queue, vouchers: vouchers}
 }
 
 func (r Reader) Run(ctx context.Context, now time.Time) (int, error) {
@@ -60,11 +69,24 @@ func (r Reader) Run(ctx context.Context, now time.Time) (int, error) {
 			return enqueued, err
 		}
 
+		var voucher domain.Voucher
+		if r.vouchers != nil {
+			voucher, err = r.vouchers.CreateBirthdayVoucher(ctx, user, now, voucherItemIDs(wishlist, fyp))
+			if err != nil {
+				return enqueued, err
+			}
+			if voucher.Existed {
+				continue
+			}
+		}
+
 		job := domain.BirthdayJob{
 			ID:            fmt.Sprintf("birthday-%s-user-%s", now.Format("2006-01-02"), user.ID),
 			UserID:        user.ID,
 			Date:          now,
 			User:          user,
+			VoucherCode:   voucher.Code,
+			VoucherID:     voucher.ID,
 			WishlistItems: wishlist,
 			FYPItems:      fyp,
 			PopularItems:  popular,
@@ -77,4 +99,26 @@ func (r Reader) Run(ctx context.Context, now time.Time) (int, error) {
 	}
 
 	return enqueued, nil
+}
+
+func voucherItemIDs(wishlist []domain.WishlistItem, fyp []domain.FYPItem) []string {
+	seen := make(map[string]struct{}, len(wishlist)+len(fyp))
+	itemIDs := make([]string, 0, len(wishlist)+len(fyp))
+	add := func(id string) {
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		itemIDs = append(itemIDs, id)
+	}
+	for _, item := range wishlist {
+		add(item.ID)
+	}
+	for _, item := range fyp {
+		add(item.ID)
+	}
+	return itemIDs
 }

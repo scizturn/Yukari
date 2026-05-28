@@ -15,6 +15,7 @@ RUN addgroup -S yukari && adduser -S yukari -G yukari
 WORKDIR /app
 COPY --from=build /out/yukari /usr/local/bin/yukari
 COPY data/sql ./data/sql
+COPY data/vouchers ./data/vouchers
 
 USER yukari
 

@@ -10,24 +10,29 @@ import (
 )
 
 type Config struct {
-	Timezone      string
-	SQLDir        string
-	DatabaseDSN   string
-	RedisAddr     string
-	RedisPassword string
-	RedisDB       int
-	QueueName     string
+	Timezone          string
+	SQLDir            string
+	DatabaseDSN       string
+	VoucherConfigPath string
+	VoucherCodeSecret string
+	RedisAddr         string
+	RedisPassword     string
+	RedisDB           int
+	QueueName         string
 }
 
 func Load() Config {
+	databaseDSN := oldDatabaseDSN()
 	return Config{
-		Timezone:      env("YUKARI_TIMEZONE", "Asia/Jakarta"),
-		SQLDir:        env("YUKARI_SQL_DIR", "data/sql"),
-		DatabaseDSN:   oldDatabaseDSN(),
-		RedisAddr:     env("REDIS_ADDR", "redis:6379"),
-		RedisPassword: os.Getenv("REDIS_PASSWORD"),
-		RedisDB:       envInt("REDIS_DB", 0),
-		QueueName:     env("YUKARI_QUEUE_NAME", "birthday_email_jobs"),
+		Timezone:          env("YUKARI_TIMEZONE", "Asia/Jakarta"),
+		SQLDir:            env("YUKARI_SQL_DIR", "data/sql"),
+		DatabaseDSN:       databaseDSN,
+		VoucherConfigPath: "data/vouchers/birthday.json",
+		VoucherCodeSecret: os.Getenv("VOUCHER_CODE_SECRET"),
+		RedisAddr:         env("REDIS_ADDR", "redis:6379"),
+		RedisPassword:     os.Getenv("REDIS_PASSWORD"),
+		RedisDB:           envInt("REDIS_DB", 0),
+		QueueName:         env("YUKARI_QUEUE_NAME", "birthday_email_jobs"),
 	}
 }
 
