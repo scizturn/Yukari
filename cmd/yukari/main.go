@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kyou-id/yukari/internal/audit"
 	"github.com/kyou-id/yukari/internal/config"
 	"github.com/kyou-id/yukari/internal/queue"
 	"github.com/kyou-id/yukari/internal/reader"
@@ -48,11 +49,31 @@ func main() {
 		}()
 	}
 
-	count, err := reader.NewWithVoucherCreator(store, redisQueue, voucherCreator).Run(ctx, now)
+	auditLogger, err := buildAuditLogger(cfg)
+	if err != nil {
+		log.Fatalf("build audit logger: %v", err)
+	}
+	if auditLogger != nil {
+		defer func() {
+			if err := auditLogger.Close(); err != nil {
+				log.Printf("audit db close failed: %v", err)
+			}
+		}()
+	}
+
+	count, err := reader.NewWithVoucherCreatorAndAudit(store, redisQueue, voucherCreator, auditLogger, cfg.QueueName, cfg.ActionURL).Run(ctx, now)
 	if err != nil {
 		log.Fatalf("reader failed: %v", err)
 	}
 	log.Printf("yukari enqueued %d birthday email job(s)", count)
+}
+
+func buildAuditLogger(cfg config.Config) (*audit.Logger, error) {
+	if strings.TrimSpace(cfg.DatabaseDSN) == "" {
+		log.Print("OLD_DATABASE_* is empty; Yukari will run without email delivery audit logs")
+		return nil, nil
+	}
+	return audit.Open(cfg.DatabaseDSN)
 }
 
 func buildStore(cfg config.Config, now time.Time) (reader.Store, error) {

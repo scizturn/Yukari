@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/kyou-id/yukari/internal/audit"
 	"github.com/kyou-id/yukari/internal/config"
 	"github.com/kyou-id/yukari/internal/domain"
 	"github.com/kyou-id/yukari/internal/queue"
@@ -94,6 +96,33 @@ func main() {
 			log.Printf("redis close failed: %v", err)
 		}
 	}()
+	auditLogger, err := audit.Open(cfg.DatabaseDSN)
+	if err != nil {
+		log.Fatalf("open audit logger: %v", err)
+	}
+	defer func() {
+		if err := auditLogger.Close(); err != nil {
+			log.Printf("audit db close failed: %v", err)
+		}
+	}()
+	claimURL := actionURLWithClaim(cfg.ActionURL, voucher.Code)
+	if err := auditLogger.InsertQueued(ctx, audit.QueuedEmail{
+		JobID:       job.ID,
+		QueueName:   cfg.QueueName,
+		Attempt:     job.Attempt,
+		UserID:      job.UserID,
+		ToEmail:     job.User.Email,
+		ActionURL:   claimURL,
+		ReferenceID: job.UserID,
+		Metadata: map[string]any{
+			"voucher_id":   job.VoucherID,
+			"voucher_code": job.VoucherCode,
+			"claim_url":    claimURL,
+			"forced":       true,
+		},
+	}); err != nil {
+		log.Fatalf("insert audit queued row: %v", err)
+	}
 	if err := redisQueue.Enqueue(ctx, job); err != nil {
 		log.Fatalf("enqueue force job: %v", err)
 	}
@@ -112,6 +141,20 @@ func main() {
 		len(fyp),
 		len(popular),
 	)
+}
+
+func actionURLWithClaim(baseURL string, voucherCode string) string {
+	if baseURL == "" || voucherCode == "" {
+		return baseURL
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return baseURL
+	}
+	query := parsed.Query()
+	query.Set("claim", voucherCode)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
 
 func voucherItemIDs(wishlist []domain.WishlistItem, fyp []domain.FYPItem) []string {

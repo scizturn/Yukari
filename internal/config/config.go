@@ -15,6 +15,7 @@ type Config struct {
 	DatabaseDSN       string
 	VoucherConfigPath string
 	VoucherCodeSecret string
+	ActionURL         string
 	RedisAddr         string
 	RedisPassword     string
 	RedisDB           int
@@ -29,6 +30,7 @@ func Load() Config {
 		DatabaseDSN:       databaseDSN,
 		VoucherConfigPath: "data/vouchers/birthday.json",
 		VoucherCodeSecret: os.Getenv("VOUCHER_CODE_SECRET"),
+		ActionURL:         env("YUKARI_ACTION_URL", "https://kyou.id/user/my-voucher"),
 		RedisAddr:         env("REDIS_ADDR", "redis:6379"),
 		RedisPassword:     os.Getenv("REDIS_PASSWORD"),
 		RedisDB:           envInt("REDIS_DB", 0),

@@ -7,6 +7,7 @@ RUN go mod download
 
 COPY . .
 RUN go build -o /out/yukari ./cmd/yukari
+RUN go build -o /out/forcejob ./cmd/forcejob
 
 FROM alpine:3.20
 
@@ -14,9 +15,11 @@ RUN addgroup -S yukari && adduser -S yukari -G yukari
 
 WORKDIR /app
 COPY --from=build /out/yukari /usr/local/bin/yukari
+COPY --from=build /out/forcejob /usr/local/bin/forcejob
 COPY data/sql ./data/sql
 COPY data/vouchers ./data/vouchers
+COPY db/migrations ./db/migrations
 
 USER yukari
 
-ENTRYPOINT ["yukari"]
+CMD ["sh", "-c", "sleep infinity"]
