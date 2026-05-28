@@ -12,6 +12,7 @@ RUN go build -o /out/migrateemailaudit ./cmd/migrateemailaudit
 
 FROM alpine:3.20
 
+RUN apk add --no-cache ca-certificates tzdata
 RUN addgroup -S yukari && adduser -S yukari -G yukari
 
 WORKDIR /app
