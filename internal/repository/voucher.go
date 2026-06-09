@@ -38,12 +38,22 @@ type BirthdayVoucherConfig struct {
 	PricingVoucherCode string              `json:"pricing_voucher_code"`
 	Rules              []VoucherRuleConfig `json:"rules"`
 	BusinessRules      []VoucherRuleConfig `json:"business_rules"`
+	BasicInfo          *VoucherBasicInfo   `json:"basic_info"`
 }
 
 type VoucherRuleConfig struct {
 	Type     string `json:"type"`
 	Operator string `json:"operator"`
 	Value    string `json:"value"`
+}
+
+type VoucherBasicInfo struct {
+	ItemTypes       []string `json:"item_types"`
+	UserRoles       []string `json:"user_roles"`
+	IsPartner       int      `json:"is_partner"`
+	SpecificUserIDs string   `json:"specific_user_ids"`
+	AccountAgeMin   string   `json:"account_age_min"`
+	AccountAgeMax   string   `json:"account_age_max"`
 }
 
 type MySQLVoucherCreator struct {
@@ -129,6 +139,10 @@ LIMIT 1`, c.cfg.PricingVoucherCode).Scan(&pricingVoucherID)
 	startAt := birthdayDate
 	expiredAt := birthdayDate.AddDate(0, 0, c.cfg.DurationDays.Value)
 	requiresClaim := boolInt(c.cfg.RequiresClaim.Value)
+	basicInfoJSON, err := json.Marshal(c.cfg.BasicInfo)
+	if err != nil {
+		return domain.Voucher{}, err
+	}
 	result, err := tx.ExecContext(ctx, `
 INSERT INTO vouchers (
   code,
@@ -147,9 +161,10 @@ INSERT INTO vouchers (
   usage_limit_per_user,
   is_active,
   claim_animation,
+  basic_info,
   created_at,
   updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NOW(), NOW())`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NOW(), NOW())`,
 		code,
 		c.voucherName(),
 		stringPtrValue(c.cfg.Description),
@@ -165,6 +180,7 @@ INSERT INTO vouchers (
 		c.cfg.UsageLimitTotal.sqlValue(),
 		c.cfg.UsageLimitPerUser.Value,
 		stringPtrValue(c.cfg.ClaimAnimation),
+		string(basicInfoJSON),
 	)
 	if err != nil {
 		return domain.Voucher{}, err
@@ -250,6 +266,10 @@ LIMIT 1`, c.cfg.PricingVoucherCode).Scan(&pricingVoucherID)
 	startAt := anniversaryDate
 	expiredAt := anniversaryDate.AddDate(0, 0, 14) // Hardcoded 2 weeks for anniversary
 	requiresClaim := boolInt(c.cfg.RequiresClaim.Value)
+	basicInfoJSON, err := json.Marshal(c.cfg.BasicInfo)
+	if err != nil {
+		return domain.Voucher{}, err
+	}
 	result, err := tx.ExecContext(ctx, `
 INSERT INTO vouchers (
   code,
@@ -268,11 +288,12 @@ INSERT INTO vouchers (
   usage_limit_per_user,
   is_active,
   claim_animation,
+  basic_info,
   created_at,
   updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NOW(), NOW())`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NOW(), NOW())`,
 		code,
-		"ANNIVERSARY", // Changed from c.voucherName()
+		"ANNIVERSARY",
 		stringPtrValue(c.cfg.Description),
 		c.cfg.Type,
 		c.cfg.Amount.Value,
@@ -286,6 +307,7 @@ INSERT INTO vouchers (
 		c.cfg.UsageLimitTotal.sqlValue(),
 		c.cfg.UsageLimitPerUser.Value,
 		stringPtrValue(c.cfg.ClaimAnimation),
+		string(basicInfoJSON),
 	)
 	if err != nil {
 		return domain.Voucher{}, err

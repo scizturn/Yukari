@@ -37,5 +37,13 @@
       "operator": "include",
       "value": "3"
     }
-  ]
+  ],
+  "basic_info": {
+    "item_types": ["ready"],
+    "user_roles": [],
+    "is_partner": 0,
+    "specific_user_ids": "",
+    "account_age_min": "",
+    "account_age_max": ""
+  }
 }
