@@ -211,6 +211,9 @@ INSERT INTO voucher_pricing_aliases (
 	if err = c.insertConfiguredBusinessRules(ctx, tx, voucherID, user.ID, itemIDs); err != nil {
 		return domain.Voucher{}, err
 	}
+	if err = c.insertBasicInfoRules(ctx, tx, voucherID); err != nil {
+		return domain.Voucher{}, err
+	}
 	if err = tx.Commit(); err != nil {
 		return domain.Voucher{}, err
 	}
@@ -338,6 +341,9 @@ INSERT INTO voucher_pricing_aliases (
 	if err = c.insertConfiguredBusinessRules(ctx, tx, voucherID, user.ID, itemIDs); err != nil {
 		return domain.Voucher{}, err
 	}
+	if err = c.insertBasicInfoRules(ctx, tx, voucherID); err != nil {
+		return domain.Voucher{}, err
+	}
 	if err = tx.Commit(); err != nil {
 		return domain.Voucher{}, err
 	}
@@ -444,6 +450,20 @@ INSERT INTO voucher_rules (
   created_at,
   updated_at
 ) VALUES (?, ?, ?, ?, NOW(), NOW())`, voucherID, ruleType, value, operator)
+	return err
+}
+
+func (c *MySQLVoucherCreator) insertBasicInfoRules(ctx context.Context, tx *sql.Tx, voucherID int64) error {
+	if c.cfg.BasicInfo == nil || len(c.cfg.BasicInfo.ItemTypes) == 0 {
+		return nil
+	}
+	val, err := json.Marshal(c.cfg.BasicInfo.ItemTypes)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
+INSERT INTO voucher_rules (voucher_id, rule_type, rule_value, rule_operator, created_at, updated_at)
+VALUES (?, 'item_type', ?, 'include', NOW(), NOW())`, voucherID, string(val))
 	return err
 }
 
