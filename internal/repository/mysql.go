@@ -28,7 +28,7 @@ func OpenMySQLStore(dsn string, loader sqlfiles.Loader) (*MySQLStore, error) {
 }
 
 func NewMySQLStore(db *sql.DB, loader sqlfiles.Loader) (*MySQLStore, error) {
-	names := []string{"birthday_users", "wishlist_items", "fyp_items", "popular_items", "user_converted"}
+	names := []string{"birthday_users", "wishlist_items", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders"}
 	queries := make(map[string]string, len(names))
 	for _, name := range names {
 		query, err := loader.Read(name)
@@ -60,8 +60,57 @@ func (s *MySQLStore) BirthdayUsers(ctx context.Context, monthDay string) ([]doma
 	return users, rows.Err()
 }
 
+func (s *MySQLStore) AnniversaryUsers(ctx context.Context, monthDay string) ([]domain.User, map[string]int, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["anniversary_users"], monthDay)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	var users []domain.User
+	yearsMap := make(map[string]int)
+	for rows.Next() {
+		var user domain.User
+		var active bool
+		var years int
+		if err := rows.Scan(&user.ID, &user.Name, &user.Email, &user.Birthday, &active, &years); err != nil {
+			return nil, nil, err
+		}
+		user.IsActive = active
+		users = append(users, user)
+		yearsMap[user.ID] = years
+	}
+	return users, yearsMap, rows.Err()
+}
+
+func (s *MySQLStore) HistoricalOrders(ctx context.Context, userID string) ([]domain.HistoricalItem, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["historical_orders"], userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []domain.HistoricalItem
+	for rows.Next() {
+		var item domain.HistoricalItem
+		if err := rows.Scan(&item.Name, &item.ImageURL, &item.OrderDate); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *MySQLStore) Wishlist(ctx context.Context, userID string) ([]domain.WishlistItem, error) {
-	rows, err := s.db.QueryContext(ctx, s.queries["wishlist_items"], userID)
+	return s.wishlistRows(ctx, s.queries["wishlist_items"], userID)
+}
+
+func (s *MySQLStore) WishlistAnniversary(ctx context.Context, userID string) ([]domain.WishlistItem, error) {
+	return s.wishlistRows(ctx, s.queries["wishlist_items_anniversary"], userID)
+}
+
+func (s *MySQLStore) wishlistRows(ctx context.Context, query string, userID string) ([]domain.WishlistItem, error) {
+	rows, err := s.db.QueryContext(ctx, query, userID)
 	if err != nil {
 		return nil, err
 	}

@@ -50,6 +50,27 @@ type BirthdayJob struct {
 	Attempt       int            `json:"attempt"`
 }
 
+type HistoricalItem struct {
+	Name      string    `json:"name"`
+	ImageURL  string    `json:"image_url"`
+	OrderDate time.Time `json:"order_date"`
+	DaysAgo   int       `json:"days_ago"`
+}
+
+type AnniversaryJob struct {
+	ID             string         `json:"job_id"`
+	UserID         string         `json:"user_id"`
+	Date           time.Time      `json:"anniversary_date"`
+	User           User           `json:"user"`
+	Years          int            `json:"years"`
+	VoucherCode    string         `json:"voucher_code,omitempty"`
+	VoucherID      int64          `json:"voucher_id,omitempty"`
+	HistoricalItem HistoricalItem `json:"historical_item"`
+	WishlistItems  []WishlistItem `json:"wishlist_items"`
+	PopularItems   []FYPItem      `json:"popular_items"`
+	Attempt        int            `json:"attempt"`
+}
+
 type Voucher struct {
 	ID        int64
 	Code      string

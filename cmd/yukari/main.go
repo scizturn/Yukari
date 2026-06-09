@@ -9,11 +9,22 @@ import (
 
 	"github.com/kyou-id/yukari/internal/audit"
 	"github.com/kyou-id/yukari/internal/config"
+	"github.com/kyou-id/yukari/internal/domain"
 	"github.com/kyou-id/yukari/internal/queue"
 	"github.com/kyou-id/yukari/internal/reader"
 	"github.com/kyou-id/yukari/internal/repository"
 	"github.com/kyou-id/yukari/internal/sqlfiles"
 )
+
+// anniversaryQueueAdapter adapts RedisQueue.EnqueueAnniversaryTo to the AnniversaryQueue interface.
+type anniversaryQueueAdapter struct {
+	queue     *queue.RedisQueue
+	queueName string
+}
+
+func (a anniversaryQueueAdapter) EnqueueAnniversary(ctx context.Context, job domain.AnniversaryJob) error {
+	return a.queue.EnqueueAnniversaryTo(ctx, a.queueName, job)
+}
 
 func main() {
 	ctx := context.Background()
@@ -61,11 +72,37 @@ func main() {
 		}()
 	}
 
-	count, err := reader.NewWithVoucherCreatorAndAudit(store, redisQueue, voucherCreator, auditLogger, cfg.QueueName, cfg.ActionURL).Run(ctx, now)
-	if err != nil {
-		log.Fatalf("reader failed: %v", err)
+	// --- Birthday pipeline ---
+	if cfg.Mode == "birthday" || cfg.Mode == "all" {
+		count, err := reader.NewWithVoucherCreatorAndAudit(store, redisQueue, voucherCreator, auditLogger, cfg.QueueName, cfg.ActionURL).Run(ctx, now)
+		if err != nil {
+			log.Fatalf("reader failed: %v", err)
+		}
+		log.Printf("yukari enqueued %d birthday email job(s)", count)
+	} else {
+		log.Print("YUKARI_MODE is not 'birthday' or 'all'; skipping birthday pipeline")
 	}
-	log.Printf("yukari enqueued %d birthday email job(s)", count)
+
+	// --- Anniversary pipeline ---
+	if !cfg.AnniversaryEnabled {
+		log.Print("YUKARI_ANNIVERSARY_ENABLED is false; skipping anniversary pipeline")
+		return
+	}
+	if cfg.Mode == "anniversary" || cfg.Mode == "all" {
+		anniversaryStore, ok := store.(reader.AnniversaryStore)
+		if !ok {
+			log.Print("store does not support anniversary queries; skipping anniversary pipeline")
+			return
+		}
+		annivQueue := anniversaryQueueAdapter{queue: redisQueue, queueName: cfg.AnniversaryQueueName}
+		annivCount, err := reader.NewAnniversary(anniversaryStore, annivQueue, voucherCreator, auditLogger, cfg.AnniversaryQueueName, cfg.ActionURL).Run(ctx, now)
+		if err != nil {
+			log.Fatalf("anniversary reader failed: %v", err)
+		}
+		log.Printf("yukari enqueued %d anniversary email job(s)", annivCount)
+	} else {
+		log.Print("YUKARI_MODE is not 'anniversary' or 'all'; skipping anniversary pipeline")
+	}
 }
 
 func buildAuditLogger(cfg config.Config) (*audit.Logger, error) {

@@ -66,18 +66,7 @@ func (r Reader) Run(ctx context.Context, now time.Time) (int, error) {
 	}
 
 	enqueued := 0
-	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	for _, user := range users {
-		converted, err := r.store.HasConverted(ctx, user.ID, start, start.Add(14*24*time.Hour))
-		if err != nil {
-			return enqueued, err
-		}
-		if converted {
-			if err := r.insertSkipped(ctx, now, user, "converted_within_campaign_window"); err != nil {
-				return enqueued, err
-			}
-			continue
-		}
 		alreadySentThisYear, err := r.hasBirthdayVoucherEmailInYear(ctx, user.ID, now.Year())
 		if err != nil {
 			return enqueued, err

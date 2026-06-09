@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	FeatureBirthdayVoucher = "birthday_voucher"
-	ProviderKirimEmail     = "kirim.email"
+	FeatureBirthdayVoucher    = "birthday_voucher"
+	FeatureAnniversaryVoucher = "anniversary_voucher"
+	ProviderKirimEmail        = "kirim.email"
 )
 
 type Logger struct {
@@ -30,6 +31,7 @@ type QueuedEmail struct {
 	ActionURL   string
 	Metadata    map[string]any
 	ReferenceID string
+	Feature     string
 }
 
 type SkippedEmail struct {
@@ -38,6 +40,7 @@ type SkippedEmail struct {
 	ToEmail     string
 	SkipReason  string
 	ReferenceID string
+	Feature     string
 }
 
 func Open(dsn string) (*Logger, error) {
@@ -99,7 +102,7 @@ ON DUPLICATE KEY UPDATE
   status = 'queued',
   queued_at = COALESCE(queued_at, NOW()),
   updated_at = NOW()`,
-		FeatureBirthdayVoucher,
+		featureValue(email.Feature),
 		referenceID(email.ReferenceID, email.UserID),
 		email.JobID,
 		email.QueueName,
@@ -138,7 +141,7 @@ ON DUPLICATE KEY UPDATE
   skip_reason = VALUES(skip_reason),
   skipped_at = COALESCE(skipped_at, NOW()),
   updated_at = NOW()`,
-		FeatureBirthdayVoucher,
+		featureValue(email.Feature),
 		referenceID(email.ReferenceID, email.UserID),
 		email.JobID,
 		userIDValue(email.UserID),
@@ -176,11 +179,66 @@ SELECT EXISTS (
 	return exists, err
 }
 
+func (l *Logger) CountPreviousAnniversaryEmails(ctx context.Context, userID string, currentYear int) (int, error) {
+	if l == nil {
+		return 0, nil
+	}
+	end := time.Date(currentYear, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	var count int
+	err := l.db.QueryRowContext(ctx, `
+SELECT COUNT(DISTINCT YEAR(created_at))
+FROM email_delivery_logs
+WHERE feature = ?
+  AND reference_type = 'user'
+  AND reference_id = ?
+  AND created_at < ?`,
+		FeatureAnniversaryVoucher,
+		userID,
+		end,
+	).Scan(&count)
+	return count, err
+}
+
+func (l *Logger) HasAnniversaryVoucherEmailInYear(ctx context.Context, userID string, year int) (bool, error) {
+	if l == nil {
+		return false, nil
+	}
+	start := time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(1, 0, 0)
+
+	var exists bool
+	err := l.db.QueryRowContext(ctx, `
+SELECT EXISTS (
+  SELECT 1
+  FROM email_delivery_logs
+  WHERE feature = ?
+    AND reference_type = 'user'
+    AND reference_id = ?
+    AND created_at >= ?
+    AND created_at < ?
+  LIMIT 1
+)`,
+		FeatureAnniversaryVoucher,
+		userID,
+		start,
+		end,
+	).Scan(&exists)
+	return exists, err
+}
+
 func referenceID(referenceID string, userID string) string {
 	if referenceID != "" {
 		return referenceID
 	}
 	return userID
+}
+
+func featureValue(feature string) string {
+	if feature == "" {
+		return FeatureBirthdayVoucher
+	}
+	return feature
 }
 
 func userIDValue(userID string) any {

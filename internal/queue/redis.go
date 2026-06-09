@@ -37,3 +37,11 @@ func (q *RedisQueue) Enqueue(ctx context.Context, job domain.BirthdayJob) error 
 	}
 	return q.client.RPush(ctx, q.name, payload).Err()
 }
+
+func (q *RedisQueue) EnqueueAnniversaryTo(ctx context.Context, queueName string, job domain.AnniversaryJob) error {
+	payload, err := EncodeAnniversaryJob(job)
+	if err != nil {
+		return err
+	}
+	return q.client.RPush(ctx, queueName, payload).Err()
+}

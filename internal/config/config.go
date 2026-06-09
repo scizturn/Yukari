@@ -10,6 +10,7 @@ import (
 )
 
 type Config struct {
+	Mode              string
 	Timezone          string
 	SQLDir            string
 	DatabaseDSN       string
@@ -19,22 +20,29 @@ type Config struct {
 	RedisAddr         string
 	RedisPassword     string
 	RedisDB           int
-	QueueName         string
+	QueueName                  string
+	AnniversaryEnabled         bool
+	AnniversaryQueueName       string
+	AnniversaryVoucherConfigPath string
 }
 
 func Load() Config {
 	databaseDSN := oldDatabaseDSN()
 	return Config{
-		Timezone:          env("YUKARI_TIMEZONE", "Asia/Jakarta"),
-		SQLDir:            env("YUKARI_SQL_DIR", "data/sql"),
-		DatabaseDSN:       databaseDSN,
-		VoucherConfigPath: "data/vouchers/birthday.json",
-		VoucherCodeSecret: os.Getenv("VOUCHER_CODE_SECRET"),
-		ActionURL:         env("YUKARI_ACTION_URL", "https://kyou.id/user/my-voucher"),
-		RedisAddr:         env("REDIS_ADDR", "redis:6379"),
-		RedisPassword:     os.Getenv("REDIS_PASSWORD"),
-		RedisDB:           envInt("REDIS_DB", 0),
-		QueueName:         env("YUKARI_QUEUE_NAME", "birthday_email_jobs"),
+		Mode:                       env("YUKARI_MODE", "all"),
+		Timezone:                   env("YUKARI_TIMEZONE", "Asia/Jakarta"),
+		SQLDir:                     env("YUKARI_SQL_DIR", "data/sql"),
+		DatabaseDSN:                databaseDSN,
+		VoucherConfigPath:          "data/vouchers/birthday.json",
+		AnniversaryVoucherConfigPath: env("YUKARI_ANNIVERSARY_VOUCHER_CONFIG", "data/vouchers/anniversary.json"),
+		VoucherCodeSecret:          os.Getenv("VOUCHER_CODE_SECRET"),
+		ActionURL:                  env("YUKARI_ACTION_URL", "https://kyou.id/user/my-voucher"),
+		RedisAddr:                  env("REDIS_ADDR", "redis:6379"),
+		RedisPassword:              os.Getenv("REDIS_PASSWORD"),
+		RedisDB:                    envInt("REDIS_DB", 0),
+		QueueName:                  env("YUKARI_QUEUE_NAME", "birthday_email_jobs"),
+		AnniversaryEnabled:         envBool("YUKARI_ANNIVERSARY_ENABLED", false),
+		AnniversaryQueueName:       env("YUKARI_ANNIVERSARY_QUEUE_NAME", "anniversary_email_jobs"),
 	}
 }
 
@@ -81,4 +89,12 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func envBool(key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	return value == "1" || strings.EqualFold(value, "true") || strings.EqualFold(value, "yes")
 }
