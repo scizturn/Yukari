@@ -3,6 +3,7 @@ package reader
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kyou-id/yukari/internal/audit"
@@ -195,6 +196,9 @@ func FillWishlistToSix(wishlist []domain.WishlistItem, fyp []domain.FYPItem, pop
 				return wishlist
 			}
 			if p.ID != "" && seen[p.ID] {
+				continue
+			}
+			if strings.EqualFold(p.Status, "sold_out") || strings.EqualFold(p.Status, "soldout") {
 				continue
 			}
 			if p.ID != "" {

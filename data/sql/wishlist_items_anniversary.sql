@@ -24,6 +24,7 @@ LEFT JOIN images img ON img.image_id = (
 WHERE w.user_id = ?
   AND i.is_available = 1
   AND i.stock > 0
+  AND i.status != 'sold_out'
   AND COALESCE(i.isAdult, 0) = 0
   AND (ip.po_deadline IS NULL OR ip.po_deadline >= CURRENT_DATE)
 ORDER BY i.view_count DESC, w.created_at DESC
