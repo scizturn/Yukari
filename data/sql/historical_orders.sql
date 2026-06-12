@@ -3,7 +3,7 @@ SELECT
   COALESCE(CONCAT('https://kyoucdn.id/', img.path, '.webp'), '') AS image_url,
   o.created_at AS order_date
 FROM orders o
-LEFT JOIN order_items oi ON oi.order_id = o.id
+LEFT JOIN order_items oi ON oi.order_id = o.order_id
   AND oi.id = (SELECT MIN(oi2.id) FROM order_items oi2 WHERE oi2.order_id = o.order_id)
 LEFT JOIN items i ON i.item_id = oi.item_id
 LEFT JOIN images img ON img.image_id = (

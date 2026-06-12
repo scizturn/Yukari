@@ -79,12 +79,12 @@ func (r AnniversaryReader) Run(ctx context.Context, now time.Time) (int, error) 
 		if err != nil {
 			return enqueued, err
 		}
-		// Fill wishlist up to 3 using popular items as fallback
-		for _, p := range popular {
-			if len(wishlist) >= 3 {
-				break
+		if len(wishlist) < 6 {
+			fyp, err := r.store.FYP(ctx, user.ID)
+			if err != nil {
+				return enqueued, err
 			}
-			wishlist = append(wishlist, fypToWishlist(p))
+			wishlist = FillWishlistToSix(wishlist, fyp, popular)
 		}
 
 		var voucher domain.Voucher
@@ -180,6 +180,30 @@ func (r AnniversaryReader) insertSkipped(ctx context.Context, now time.Time, use
 		ReferenceID: user.ID,
 		Feature:     audit.FeatureAnniversaryVoucher,
 	})
+}
+
+func FillWishlistToSix(wishlist []domain.WishlistItem, fyp []domain.FYPItem, popular []domain.FYPItem) []domain.WishlistItem {
+	seen := make(map[string]bool, len(wishlist))
+	for _, w := range wishlist {
+		if w.ID != "" {
+			seen[w.ID] = true
+		}
+	}
+	for _, src := range [][]domain.FYPItem{fyp, popular} {
+		for _, p := range src {
+			if len(wishlist) >= 6 {
+				return wishlist
+			}
+			if p.ID != "" && seen[p.ID] {
+				continue
+			}
+			if p.ID != "" {
+				seen[p.ID] = true
+			}
+			wishlist = append(wishlist, fypToWishlist(p))
+		}
+	}
+	return wishlist
 }
 
 func fypToWishlist(p domain.FYPItem) domain.WishlistItem {

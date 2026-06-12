@@ -94,8 +94,19 @@ func main() {
 			log.Print("store does not support anniversary queries; skipping anniversary pipeline")
 			return
 		}
+		anniversaryVoucherCreator, err := buildAnniversaryVoucherCreator(cfg)
+		if err != nil {
+			log.Fatalf("build anniversary voucher creator: %v", err)
+		}
+		if anniversaryVoucherCreator != nil {
+			defer func() {
+				if err := anniversaryVoucherCreator.Close(); err != nil {
+					log.Printf("anniversary voucher db close failed: %v", err)
+				}
+			}()
+		}
 		annivQueue := anniversaryQueueAdapter{queue: redisQueue, queueName: cfg.AnniversaryQueueName}
-		annivCount, err := reader.NewAnniversary(anniversaryStore, annivQueue, voucherCreator, auditLogger, cfg.AnniversaryQueueName, cfg.ActionURL).Run(ctx, now)
+		annivCount, err := reader.NewAnniversary(anniversaryStore, annivQueue, anniversaryVoucherCreator, auditLogger, cfg.AnniversaryQueueName, cfg.ActionURL).Run(ctx, now)
 		if err != nil {
 			log.Fatalf("anniversary reader failed: %v", err)
 		}
@@ -103,6 +114,26 @@ func main() {
 	} else {
 		log.Print("YUKARI_MODE is not 'anniversary' or 'all'; skipping anniversary pipeline")
 	}
+}
+
+func buildAnniversaryVoucherCreator(cfg config.Config) (*repository.MySQLVoucherCreator, error) {
+	voucherCfg, err := repository.LoadBirthdayVoucherConfig(cfg.AnniversaryVoucherConfigPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("anniversary voucher config %s not found; Yukari will enqueue anniversary jobs without creating vouchers", cfg.AnniversaryVoucherConfigPath)
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !voucherCfg.PricingVoucherID.Valid && strings.TrimSpace(voucherCfg.PricingVoucherCode) == "" {
+		log.Printf("anniversary voucher config %s has no pricing_voucher_id or pricing_voucher_code; Yukari will enqueue anniversary jobs without creating vouchers", cfg.AnniversaryVoucherConfigPath)
+		return nil, nil
+	}
+	if strings.TrimSpace(cfg.DatabaseDSN) == "" {
+		log.Print("OLD_DATABASE_* is empty; Yukari will enqueue anniversary jobs without creating vouchers")
+		return nil, nil
+	}
+	return repository.OpenMySQLVoucherCreator(cfg.DatabaseDSN, voucherCfg, cfg.VoucherCodeSecret)
 }
 
 func buildAuditLogger(cfg config.Config) (*audit.Logger, error) {
