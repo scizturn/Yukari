@@ -1,9 +1,9 @@
 {
-  "name": "🎉 Hadiah Spesial Anniversary Kamu",
-  "description": "Terima kasih sudah setia berbelanja di Kyou.id! Gunakan voucher ini untuk item incaranmu.",
+  "name": "🥳 Memberversarry!",
+  "description": "Voucher Anniversarry User bersama Kyou!",
   "type": "discount_percent",
-  "amount": "10",
-  "max_discount": "100000",
+  "amount": "15",
+  "max_discount": "120000",
   "min_purchase": "0",
   "distribution": "manual",
   "requires_claim": 1,
@@ -13,34 +13,34 @@
   "usage_limit_per_user": "1",
   "claim_animation": "envelope",
   "duration_days": 14,
-  "pricing_voucher_id": "53",
+  "pricing_voucher_id": "453",
   "rules": [
-    {
-      "type": "item_remaining_life_min",
-      "operator": "include",
-      "value": "90"
-    },
     {
       "type": "item_age_min",
       "operator": "include",
       "value": "30"
+    },
+    {
+      "type": "item_remaining_life_min",
+      "operator": "include",
+      "value": "45"
     }
   ],
   "business_rules": [
     {
-      "type": "gp_ratio_min",
-      "operator": "include",
-      "value": "40"
-    },
-    {
       "type": "stock_min",
       "operator": "include",
       "value": "3"
+    },
+    {
+      "type": "gp_ratio_min",
+      "operator": "include",
+      "value": "30"
     }
   ],
   "basic_info": {
     "item_types": ["ready"],
-    "user_roles": [],
+    "user_roles": ["user"],
     "is_partner": 0,
     "specific_user_ids": "",
     "account_age_min": "",
