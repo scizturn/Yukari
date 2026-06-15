@@ -15,6 +15,7 @@ const (
 	FeatureAnniversaryVoucher = "anniversary_voucher"
 	FeatureLeftoverCart          = "leftover_cart"
 	FeatureDiscountedWishlist    = "discounted_wishlist"
+	FeatureWinback               = "winback"
 	ProviderKirimEmail           = "kirim.email"
 )
 

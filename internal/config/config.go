@@ -24,6 +24,8 @@ type Config struct {
 	AnniversaryVoucherConfigPath string
 	LeftoverCartQueueName           string
 	DiscountedWishlistQueueName     string
+	WinbackQueueName                string
+	WinbackVoucherConfigPath        string
 }
 
 func Load() Config {
@@ -32,7 +34,7 @@ func Load() Config {
 		Timezone:                     env("YUKARI_TIMEZONE", "Asia/Jakarta"),
 		SQLDir:                       env("YUKARI_SQL_DIR", "data/sql"),
 		DatabaseDSN:                  databaseDSN,
-		VoucherConfigPath:            "data/vouchers/birthday.json",
+		VoucherConfigPath:            env("YUKARI_BIRTHDAY_VOUCHER_CONFIG", "data/vouchers/birthday.json"),
 		AnniversaryVoucherConfigPath: env("YUKARI_ANNIVERSARY_VOUCHER_CONFIG", "data/vouchers/anniversary.json"),
 		VoucherCodeSecret:            os.Getenv("VOUCHER_CODE_SECRET"),
 		ActionURL:                    env("YUKARI_ACTION_URL", "https://kyou.id/user/my-voucher"),
@@ -43,6 +45,8 @@ func Load() Config {
 		AnniversaryQueueName:         env("YUKARI_ANNIVERSARY_QUEUE_NAME", "anniversary_email_jobs"),
 		LeftoverCartQueueName:           env("YUKARI_LEFTOVER_CART_QUEUE_NAME", "leftover_cart_email_jobs"),
 		DiscountedWishlistQueueName:     env("YUKARI_DISCOUNTED_WISHLIST_QUEUE_NAME", "discounted_wishlist_email_jobs"),
+		WinbackQueueName:                env("YUKARI_WINBACK_QUEUE_NAME", "winback_email_jobs"),
+		WinbackVoucherConfigPath:        env("YUKARI_WINBACK_VOUCHER_CONFIG", "data/vouchers/winback.json"),
 	}
 }
 

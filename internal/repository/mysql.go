@@ -28,7 +28,7 @@ func OpenMySQLStore(dsn string, loader sqlfiles.Loader) (*MySQLStore, error) {
 }
 
 func NewMySQLStore(db *sql.DB, loader sqlfiles.Loader) (*MySQLStore, error) {
-	names := []string{"birthday_users", "wishlist_items", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill"}
+	names := []string{"birthday_users", "wishlist_items", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill", "winback_users"}
 	queries := make(map[string]string, len(names))
 	for _, name := range names {
 		query, err := loader.Read(name)
@@ -255,4 +255,24 @@ func (s *MySQLStore) discountedWishlistRows(ctx context.Context, query string, i
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func (s *MySQLStore) WinbackUsers(ctx context.Context, now time.Time) ([]domain.User, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["winback_users"], now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []domain.User
+	for rows.Next() {
+		var user domain.User
+		var active bool
+		if err := rows.Scan(&user.ID, &user.Name, &user.Email, &active); err != nil {
+			return nil, err
+		}
+		user.IsActive = active
+		users = append(users, user)
+	}
+	return users, rows.Err()
 }

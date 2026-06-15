@@ -68,3 +68,23 @@ func buildAnniversaryVoucherCreator(cfg config.Config) (*repository.MySQLVoucher
 	}
 	return repository.OpenMySQLVoucherCreator(cfg.DatabaseDSN, voucherCfg, cfg.VoucherCodeSecret)
 }
+
+func buildWinbackVoucherCreator(cfg config.Config) (*repository.MySQLVoucherCreator, error) {
+	voucherCfg, err := repository.LoadBirthdayVoucherConfig(cfg.WinbackVoucherConfigPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("winback voucher config %s not found; enqueuing winback jobs without creating vouchers", cfg.WinbackVoucherConfigPath)
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !voucherCfg.PricingVoucherID.Valid && strings.TrimSpace(voucherCfg.PricingVoucherCode) == "" {
+		log.Printf("winback voucher config %s has no pricing_voucher_id or pricing_voucher_code; enqueuing without creating vouchers", cfg.WinbackVoucherConfigPath)
+		return nil, nil
+	}
+	if strings.TrimSpace(cfg.DatabaseDSN) == "" {
+		log.Print("OLD_DATABASE_* is empty; enqueuing winback jobs without creating vouchers")
+		return nil, nil
+	}
+	return repository.OpenMySQLVoucherCreator(cfg.DatabaseDSN, voucherCfg, cfg.VoucherCodeSecret)
+}

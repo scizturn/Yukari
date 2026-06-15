@@ -54,6 +54,14 @@ func (q *RedisQueue) EnqueueLeftoverCartTo(ctx context.Context, queueName string
 	return q.client.RPush(ctx, queueName, payload).Err()
 }
 
+func (q *RedisQueue) EnqueueWinbackTo(ctx context.Context, queueName string, job domain.WinbackJob) error {
+	payload, err := EncodeWinbackJob(job)
+	if err != nil {
+		return err
+	}
+	return q.client.RPush(ctx, queueName, payload).Err()
+}
+
 func (q *RedisQueue) EnqueueDiscountedWishlistTo(ctx context.Context, queueName string, job domain.DiscountedWishlistJob) error {
 	payload, err := EncodeDiscountedWishlistJob(job)
 	if err != nil {

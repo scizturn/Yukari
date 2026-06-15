@@ -103,6 +103,19 @@ type DiscountedWishlistItem struct {
 	IsWishlisted  bool       `json:"is_wishlisted"`
 }
 
+type WinbackJob struct {
+	ID             string          `json:"job_id"`
+	UserID         string          `json:"user_id"`
+	Date           time.Time       `json:"date"`
+	User           User            `json:"user"`
+	VoucherCode    string          `json:"voucher_code,omitempty"`
+	VoucherID      int64           `json:"voucher_id,omitempty"`
+	WishlistItems  []WishlistItem  `json:"wishlist_items"`
+	HistoricalItem HistoricalItem  `json:"historical_item"`
+	PopularItems   []FYPItem       `json:"popular_items"`
+	Attempt        int             `json:"attempt"`
+}
+
 type DiscountedWishlistJob struct {
 	ID      string                   `json:"job_id"`
 	UserID  string                   `json:"user_id"`
