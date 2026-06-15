@@ -242,10 +242,14 @@ func (s *MySQLStore) discountedWishlistRows(ctx context.Context, query string, i
 	var items []domain.DiscountedWishlistItem
 	for rows.Next() {
 		var item domain.DiscountedWishlistItem
+		var discountPrice sql.NullInt64
+		var discountName sql.NullString
 		var discountEnd sql.NullTime
-		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.ImageURL, &item.OriginalPrice, &item.DiscountPrice, &item.DiscountName, &discountEnd, &item.Status, &item.Manufacturer, &item.SeriesName); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.ImageURL, &item.OriginalPrice, &discountPrice, &discountName, &discountEnd, &item.Status, &item.Manufacturer, &item.SeriesName); err != nil {
 			return nil, err
 		}
+		item.DiscountPrice = int(discountPrice.Int64)
+		item.DiscountName = discountName.String
 		item.DiscountEnd = timePtr(discountEnd)
 		item.IsWishlisted = isWishlisted
 		items = append(items, item)
