@@ -13,6 +13,7 @@ import (
 const (
 	FeatureBirthdayVoucher    = "birthday_voucher"
 	FeatureAnniversaryVoucher = "anniversary_voucher"
+	FeatureLeftoverCart       = "leftover_cart"
 	ProviderKirimEmail        = "kirim.email"
 )
 
@@ -223,6 +224,29 @@ SELECT EXISTS (
 		userID,
 		start,
 		end,
+	).Scan(&exists)
+	return exists, err
+}
+
+func (l *Logger) HasLeftoverCartEmailSinceActivity(ctx context.Context, userID string, since time.Time) (bool, error) {
+	if l == nil {
+		return false, nil
+	}
+	var exists bool
+	err := l.db.QueryRowContext(ctx, `
+SELECT EXISTS (
+  SELECT 1
+  FROM email_delivery_logs
+  WHERE feature = ?
+    AND reference_type = 'user'
+    AND reference_id = ?
+    AND status IN ('sent', 'queued', 'sending')
+    AND created_at >= ?
+  LIMIT 1
+)`,
+		FeatureLeftoverCart,
+		userID,
+		since,
 	).Scan(&exists)
 	return exists, err
 }

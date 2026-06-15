@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 	"time"
 
@@ -18,7 +17,7 @@ import (
 	"github.com/kyou-id/yukari/internal/sqlfiles"
 )
 
-func main() {
+func runAnniversary() {
 	ctx := context.Background()
 	cfg := config.Load()
 	if strings.TrimSpace(cfg.DatabaseDSN) == "" {
@@ -86,7 +85,7 @@ func main() {
 		}
 	}()
 
-	itemIDs := wishlistItemIDs(wishlist)
+	itemIDs := anniversaryWishlistItemIDs(wishlist)
 	voucher, err := voucherCreator.CreateAnniversaryVoucher(ctx, user, now, itemIDs)
 	if err != nil {
 		log.Fatalf("create anniversary voucher: %v", err)
@@ -166,7 +165,7 @@ LIMIT 1`, userID).Scan(&user.ID, &user.Name, &user.Email, &birthday, &user.IsAct
 	return user, years, nil
 }
 
-func wishlistItemIDs(wishlist []domain.WishlistItem) []string {
+func anniversaryWishlistItemIDs(wishlist []domain.WishlistItem) []string {
 	ids := make([]string, 0, len(wishlist))
 	for _, item := range wishlist {
 		if item.ID != "" {
@@ -174,24 +173,4 @@ func wishlistItemIDs(wishlist []domain.WishlistItem) []string {
 		}
 	}
 	return ids
-}
-
-func env(key, fallback string) string {
-	value := strings.TrimSpace(os.Getenv(key))
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
-func maskEmail(email string) string {
-	parts := strings.Split(email, "@")
-	if len(parts) != 2 || parts[0] == "" {
-		return email
-	}
-	local := parts[0]
-	if len(local) == 1 {
-		return local[:1] + "***@" + parts[1]
-	}
-	return local[:1] + "***" + local[len(local)-1:] + "@" + parts[1]
 }

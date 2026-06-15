@@ -77,3 +77,13 @@ type Voucher struct {
 	Existed   bool
 	CreatedAt time.Time
 }
+
+type LeftoverCartJob struct {
+	ID        string         `json:"job_id"`
+	UserID    string         `json:"user_id"`
+	Date      time.Time      `json:"date"`
+	User      User           `json:"user"`
+	CartItems []WishlistItem `json:"cart_items"`
+	RecoItems []FYPItem      `json:"reco_items"`
+	Attempt   int            `json:"attempt"`
+}

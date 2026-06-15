@@ -28,7 +28,7 @@ func OpenMySQLStore(dsn string, loader sqlfiles.Loader) (*MySQLStore, error) {
 }
 
 func NewMySQLStore(db *sql.DB, loader sqlfiles.Loader) (*MySQLStore, error) {
-	names := []string{"birthday_users", "wishlist_items", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders"}
+	names := []string{"birthday_users", "wishlist_items", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco"}
 	queries := make(map[string]string, len(names))
 	for _, name := range names {
 		query, err := loader.Read(name)
@@ -172,4 +172,34 @@ func timePtr(value sql.NullTime) *time.Time {
 		return nil
 	}
 	return &value.Time
+}
+
+func (s *MySQLStore) LeftoverCartUsers(ctx context.Context, now time.Time) ([]domain.User, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["leftover_cart_users"], now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []domain.User
+	for rows.Next() {
+		var user domain.User
+		var active bool
+		var birthday sql.NullTime
+		if err := rows.Scan(&user.ID, &user.Name, &user.Email, &birthday, &active); err != nil {
+			return nil, err
+		}
+		user.Birthday = birthday.Time
+		user.IsActive = active
+		users = append(users, user)
+	}
+	return users, rows.Err()
+}
+
+func (s *MySQLStore) CartItems(ctx context.Context, userID string) ([]domain.WishlistItem, error) {
+	return s.wishlistRows(ctx, s.queries["leftover_cart_items"], userID)
+}
+
+func (s *MySQLStore) LeftoverCartReco(ctx context.Context, userID string) ([]domain.FYPItem, error) {
+	return s.fypRows(ctx, s.queries["leftover_cart_reco"], userID, userID)
 }
