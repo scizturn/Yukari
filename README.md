@@ -1,18 +1,32 @@
 # Yukari
 
-Birthday email reader for Kyou.id.
+Birthday dan anniversary email reader untuk Kyou.id.
 
-Yukari reads Hanayo/Kyou MySQL using SQL files from `data/sql`, builds complete birthday email job payloads, and pushes them to Redis for Makoto to send. Birthday recipients must have a non-empty email and `email_verified_at IS NOT NULL`. Wishlist and FYP payloads include public CDN image URLs from the `images` table when available.
+Yukari membaca Hanayo/Kyou MySQL menggunakan SQL files dari `data/sql`, membangun job payload lengkap, membuat voucher alias per-user, dan mendorong job ke Redis untuk Makoto kirimkan. Penerima harus memiliki email non-kosong dan `email_verified_at IS NOT NULL`.
 
 ## Flow
 
 ```text
 Hanayo DB
-  -> Yukari reader
-  -> optional Voucher 2.5 alias creation
-  -> Redis birthday_email_jobs
+  -> Yukari reader (birthday / anniversary)
+  -> Voucher alias creation (vouchers + voucher_pricing_aliases + voucher_rules)
+  -> Redis queue
   -> Makoto sender
 ```
+
+## Pipeline
+
+Yukari mendukung dua pipeline yang berjalan secara independent:
+
+| Pipeline | Trigger | Queue |
+|---|---|---|
+| Birthday | `DATE(birthdate) = hari ini` | `birthday_email_jobs` |
+| Anniversary | `DATE(created_at) = hari ini` + min 1 tahun + total orders > 300rb + order dalam 1 tahun terakhir | `anniversary_email_jobs` |
+
+Dikontrol via `YUKARI_MODE`:
+- `birthday` — hanya birthday
+- `anniversary` — hanya anniversary (butuh `YUKARI_ANNIVERSARY_ENABLED=true`)
+- `all` — keduanya (default)
 
 ## Commands
 
@@ -22,16 +36,39 @@ make build
 make run
 ```
 
+## Binaries
+
+| Binary | Fungsi |
+|---|---|
+| `yukari` | Main job harian — query users dan enqueue ke Redis |
+| `forcejob` | Force kirim birthday ke 1 user (`YUKARI_FORCE_USER=<id>`) |
+| `forcejob-anniversary` | Force kirim anniversary ke 1 user (`YUKARI_FORCE_USER=<id>`) |
+| `migrateemailaudit` | Migrasi tabel `email_delivery_logs` |
+
+## Force Job
+
+Untuk test kirim anniversary ke user spesifik tanpa menunggu jadwal:
+
+```sh
+YUKARI_FORCE_USER=12345 forcejob-anniversary
+```
+
+- Bypass eligibility check (total orders, active check)
+- Buat voucher ke DB (idempoten — reuse kalau sudah ada di tahun yang sama)
+- **Tidak** tulis audit log
+- Enqueue job ke Redis → Makoto proses dan kirim email
+
 ## Environment
 
 ```env
 YUKARI_TIMEZONE=Asia/Jakarta
 YUKARI_SQL_DIR=data/sql
+YUKARI_MODE=all
 
 OLD_DATABASE_HOST=mariadb
 OLD_DATABASE_PORT=3306
 OLD_DATABASE_NAME=kyouid_kyou
-OLD_DATABASE_USERNAME=readonly_user
+OLD_DATABASE_USERNAME=user
 OLD_DATABASE_PASSWORD=secret
 
 VOUCHER_CODE_SECRET=change-me
@@ -39,9 +76,49 @@ VOUCHER_CODE_SECRET=change-me
 REDIS_ADDR=redis:6379
 REDIS_PASSWORD=
 REDIS_DB=0
+
+# Birthday
 YUKARI_QUEUE_NAME=birthday_email_jobs
+
+# Anniversary
+YUKARI_ANNIVERSARY_ENABLED=true
+YUKARI_ANNIVERSARY_QUEUE_NAME=anniversary_email_jobs
+YUKARI_ANNIVERSARY_VOUCHER_CONFIG=data/vouchers/anniversary.json
 ```
 
-Yukari builds the MySQL DSN from `OLD_DATABASE_*` and enables `parseTime=true` automatically because it scans `users.birthdate` into Go `time.Time`.
+## Voucher
 
-When `data/vouchers/birthday.json` exists and contains `pricing_voucher_id` or `pricing_voucher_code`, Yukari creates a per-user alias voucher before enqueueing the Redis job. The generated job includes `voucher_code`, and Makoto sends that code instead of requesting a voucher from Kyou.id. Voucher codes are deterministic HMAC values from user/year plus `VOUCHER_CODE_SECRET`, so retries and birthday-date changes in the same year reuse the same random-looking code. If that yearly voucher already exists, Yukari skips enqueueing another birthday email. Voucher writes use the same `OLD_DATABASE_*` DSN, so that database user must be allowed to write `vouchers`, `voucher_pricing_aliases`, and `voucher_rules`. Yukari does not write `voucher_claims`; users claim from the email link.
+Yukari membuat voucher alias per-user sebelum enqueue. Kode voucher bersifat deterministik (HMAC dari `user_id + tahun + secret`), sehingga retry dalam tahun yang sama menghasilkan kode yang sama.
+
+- **Birthday**: prefix default, durasi dari `data/vouchers/birthday.json`
+- **Anniversary**: prefix `ANV`, durasi hardcode 14 hari, config dari `data/vouchers/anniversary.json`
+
+Kalau voucher tahun itu sudah ada → Yukari skip user (tidak enqueue duplikat).
+
+DB user yang dipakai (`OLD_DATABASE_*`) harus punya akses write ke `vouchers`, `voucher_pricing_aliases`, dan `voucher_rules`.
+
+## Audit Log
+
+Yukari menulis ke `email_delivery_logs` saat job di-enqueue (`status=queued`) dan saat user di-skip (`status=skipped`). Cek duplikat per tahun berdasarkan kolom `feature`:
+
+- `birthday_voucher` — untuk birthday
+- `anniversary_voucher` — untuk anniversary
+
+## Coolify Scheduled Tasks
+
+Jalankan `yukari` sekali sehari. Contoh setup dua task terpisah:
+
+| Field | Birthday | Anniversary |
+|---|---|---|
+| Command | `env YUKARI_MODE=birthday yukari` | `env YUKARI_MODE=anniversary YUKARI_ANNIVERSARY_ENABLED=true yukari` |
+| Frequency | `0 17 * * *` | `0 17 * * *` |
+| Timeout | 300 | 300 |
+
+Atau satu task kalau `.env` sudah `YUKARI_MODE=all` dan `YUKARI_ANNIVERSARY_ENABLED=true`:
+
+```
+Command: yukari
+Frequency: 0 17 * * *
+```
+
+`0 17 * * *` = jam 17:00 UTC = jam 00:00 WIB.
