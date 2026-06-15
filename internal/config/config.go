@@ -22,7 +22,8 @@ type Config struct {
 	QueueName                    string
 	AnniversaryQueueName         string
 	AnniversaryVoucherConfigPath string
-	LeftoverCartQueueName        string
+	LeftoverCartQueueName           string
+	DiscountedWishlistQueueName     string
 }
 
 func Load() Config {
@@ -40,7 +41,8 @@ func Load() Config {
 		RedisDB:                      envInt("REDIS_DB", 0),
 		QueueName:                    env("YUKARI_QUEUE_NAME", "birthday_email_jobs"),
 		AnniversaryQueueName:         env("YUKARI_ANNIVERSARY_QUEUE_NAME", "anniversary_email_jobs"),
-		LeftoverCartQueueName:        env("YUKARI_LEFTOVER_CART_QUEUE_NAME", "leftover_cart_email_jobs"),
+		LeftoverCartQueueName:           env("YUKARI_LEFTOVER_CART_QUEUE_NAME", "leftover_cart_email_jobs"),
+		DiscountedWishlistQueueName:     env("YUKARI_DISCOUNTED_WISHLIST_QUEUE_NAME", "discounted_wishlist_email_jobs"),
 	}
 }
 

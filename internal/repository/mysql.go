@@ -28,7 +28,7 @@ func OpenMySQLStore(dsn string, loader sqlfiles.Loader) (*MySQLStore, error) {
 }
 
 func NewMySQLStore(db *sql.DB, loader sqlfiles.Loader) (*MySQLStore, error) {
-	names := []string{"birthday_users", "wishlist_items", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco"}
+	names := []string{"birthday_users", "wishlist_items", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill"}
 	queries := make(map[string]string, len(names))
 	for _, name := range names {
 		query, err := loader.Read(name)
@@ -202,4 +202,53 @@ func (s *MySQLStore) CartItems(ctx context.Context, userID string) ([]domain.Wis
 
 func (s *MySQLStore) LeftoverCartReco(ctx context.Context, userID string) ([]domain.FYPItem, error) {
 	return s.fypRows(ctx, s.queries["leftover_cart_reco"], userID, userID)
+}
+
+func (s *MySQLStore) DiscountedWishlistUsers(ctx context.Context, now time.Time) ([]domain.User, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["discounted_wishlist_users"], now, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []domain.User
+	for rows.Next() {
+		var user domain.User
+		var active bool
+		if err := rows.Scan(&user.ID, &user.Name, &user.Email, &active); err != nil {
+			return nil, err
+		}
+		user.IsActive = active
+		users = append(users, user)
+	}
+	return users, rows.Err()
+}
+
+func (s *MySQLStore) DiscountedWishlistItems(ctx context.Context, userID string) ([]domain.DiscountedWishlistItem, error) {
+	return s.discountedWishlistRows(ctx, s.queries["discounted_wishlist_items"], true, userID)
+}
+
+func (s *MySQLStore) DiscountedWishlistFill(ctx context.Context, userID string) ([]domain.DiscountedWishlistItem, error) {
+	return s.discountedWishlistRows(ctx, s.queries["discounted_wishlist_fill"], false, userID, userID)
+}
+
+func (s *MySQLStore) discountedWishlistRows(ctx context.Context, query string, isWishlisted bool, args ...any) ([]domain.DiscountedWishlistItem, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []domain.DiscountedWishlistItem
+	for rows.Next() {
+		var item domain.DiscountedWishlistItem
+		var discountEnd sql.NullTime
+		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.ImageURL, &item.OriginalPrice, &item.DiscountPrice, &item.DiscountName, &discountEnd, &item.Status, &item.Manufacturer, &item.SeriesName); err != nil {
+			return nil, err
+		}
+		item.DiscountEnd = timePtr(discountEnd)
+		item.IsWishlisted = isWishlisted
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }

@@ -87,3 +87,27 @@ type LeftoverCartJob struct {
 	RecoItems []FYPItem      `json:"reco_items"`
 	Attempt   int            `json:"attempt"`
 }
+
+type DiscountedWishlistItem struct {
+	ID            string     `json:"id"`
+	Name          string     `json:"name"`
+	URL           string     `json:"url"`
+	ImageURL      string     `json:"image_url"`
+	OriginalPrice int        `json:"original_price"`
+	DiscountPrice int        `json:"discount_price"`
+	DiscountName  string     `json:"discount_name"`
+	DiscountEnd   *time.Time `json:"discount_end,omitempty"`
+	Status        string     `json:"status"`
+	Manufacturer  string     `json:"manufacturer"`
+	SeriesName    string     `json:"series_name"`
+	IsWishlisted  bool       `json:"is_wishlisted"`
+}
+
+type DiscountedWishlistJob struct {
+	ID      string                   `json:"job_id"`
+	UserID  string                   `json:"user_id"`
+	Date    time.Time                `json:"date"`
+	User    User                     `json:"user"`
+	Items   []DiscountedWishlistItem `json:"items"`
+	Attempt int                      `json:"attempt"`
+}
