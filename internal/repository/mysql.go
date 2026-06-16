@@ -73,8 +73,12 @@ func (s *MySQLStore) AnniversaryUsers(ctx context.Context, monthDay string) ([]d
 		var user domain.User
 		var active bool
 		var years int
-		if err := rows.Scan(&user.ID, &user.Name, &user.Email, &user.Birthday, &active, &years); err != nil {
+		var birthday sql.NullTime
+		if err := rows.Scan(&user.ID, &user.Name, &user.Email, &birthday, &active, &years); err != nil {
 			return nil, nil, err
+		}
+		if birthday.Valid {
+			user.Birthday = birthday.Time
 		}
 		user.IsActive = active
 		users = append(users, user)
