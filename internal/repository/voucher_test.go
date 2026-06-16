@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kyou-id/yukari/internal/domain"
 )
 
 func TestVoucherCodeIsDeterministicHMAC(t *testing.T) {
@@ -74,5 +76,16 @@ func TestRuleValueStoresSingleValueAsScalar(t *testing.T) {
 func TestRuleValueStoresMultipleValuesAsJSONArray(t *testing.T) {
 	if got := ruleValue([]string{"147044", "147045"}); got != "[147044,147045]" {
 		t.Fatalf("expected JSON array rule value, got %q", got)
+	}
+}
+
+func TestAnniversaryVoucherNameUsesConfigAndUserName(t *testing.T) {
+	creator := MySQLVoucherCreator{
+		cfg: BirthdayVoucherConfig{Name: "🥳 Memberversarry!"}.withDefaults(),
+	}
+
+	got := creator.anniversaryVoucherName(domain.User{Name: "Tegar"})
+	if got != "🥳 Memberversarry! Tegar" {
+		t.Fatalf("unexpected anniversary voucher name: %q", got)
 	}
 }

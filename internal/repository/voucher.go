@@ -285,7 +285,7 @@ INSERT INTO vouchers (
   updated_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NOW(), NOW())`,
 		code,
-		"ANNIVERSARY",
+		c.anniversaryVoucherName(user),
 		stringPtrValue(c.cfg.Description),
 		c.cfg.Type,
 		c.cfg.Amount.Value,
@@ -548,6 +548,18 @@ func (c *MySQLVoucherCreator) anniversaryIdempotencyKey(userID string, date time
 
 func (c *MySQLVoucherCreator) voucherName() string {
 	return c.cfg.Name
+}
+
+func (c *MySQLVoucherCreator) anniversaryVoucherName(user domain.User) string {
+	name := strings.TrimSpace(c.cfg.Name)
+	if name == "" {
+		name = "ANNIVERSARY"
+	}
+	userName := strings.TrimSpace(user.Name)
+	if userName == "" {
+		return name
+	}
+	return name + " " + userName
 }
 
 func voucherByCode(ctx context.Context, tx *sql.Tx, code string) (domain.Voucher, bool, error) {
