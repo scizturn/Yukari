@@ -12,7 +12,7 @@ WHERE DATE_FORMAT(u.created_at, '%m-%d') = ?
   AND u.email <> ''
   AND TIMESTAMPDIFF(YEAR, u.created_at, NOW()) > 0
   AND (
-    SELECT COALESCE(SUM(o.order_totals + o.remaining), 0)
+    SELECT COALESCE(SUM(o.total_price + o.remaining), 0)
     FROM orders o
     WHERE o.user_id = u.user_id
       AND o.status <> 'not paid'
