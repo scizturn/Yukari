@@ -1,6 +1,6 @@
 {
   "name": "🥳 Memberversarry!",
-  "description": "Voucher Anniversarry User bersama Kyou!",
+  "description": "Voucher Anniversarry bersama Kyou!",
   "type": "discount_percent",
   "amount": "15",
   "max_discount": "120000",
