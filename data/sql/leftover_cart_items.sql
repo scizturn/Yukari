@@ -26,4 +26,5 @@ WHERE c.user_id = ?
   AND i.is_available = 1
   AND i.stock > 0
   AND COALESCE(i.isAdult, 0) = 0
-ORDER BY ci.created_at DESC;
+ORDER BY i.view_count DESC, ci.created_at DESC
+LIMIT 4;
