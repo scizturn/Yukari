@@ -49,26 +49,38 @@ func main() {
 		log.Fatalf("read cart items: %v", err)
 	}
 
-	reco, err := store.LeftoverCartReco(ctx, user.ID)
+	orders, err := store.HistoricalOrders(ctx, user.ID)
 	if err != nil {
-		log.Fatalf("read reco items: %v", err)
+		log.Fatalf("read historical orders: %v", err)
 	}
-	if len(reco) < 3 {
-		popular, err := store.Popular(ctx)
+	var historicalItem domain.HistoricalItem
+	if len(orders) > 0 {
+		historicalItem = orders[len(orders)-1]
+	}
+	var reco []domain.FYPItem
+	if historicalItem.Name != "" {
+		reco, err = store.LeftoverCartReco(ctx, user.ID)
 		if err != nil {
-			log.Fatalf("read popular: %v", err)
+			log.Fatalf("read reco items: %v", err)
 		}
-		reco = reader.FillRecoFromPopular(reco, popular, 3)
+		if len(reco) < 3 {
+			popular, err := store.Popular(ctx)
+			if err != nil {
+				log.Fatalf("read popular: %v", err)
+			}
+			reco = reader.FillRecoFromPopular(reco, popular, 3)
+		}
 	}
 
 	job := domain.LeftoverCartJob{
-		ID:        fmt.Sprintf("preview-leftover-cart-%s-user-%s", now.Format("2006-01-02-150405"), user.ID),
-		UserID:    user.ID,
-		Date:      now,
-		User:      user,
-		CartItems: cartItems,
-		RecoItems: reco,
-		Attempt:   1,
+		ID:             fmt.Sprintf("preview-leftover-cart-%s-user-%s", now.Format("2006-01-02-150405"), user.ID),
+		UserID:         user.ID,
+		Date:           now,
+		User:           user,
+		HistoricalItem: historicalItem,
+		CartItems:      cartItems,
+		RecoItems:      reco,
+		Attempt:        1,
 	}
 
 	payload, err := json.MarshalIndent(job, "", "  ")
@@ -78,7 +90,7 @@ func main() {
 	if err := os.WriteFile(outputPath, payload, 0o600); err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("preview job written: path=%s user_id=%s cart_items=%d reco_items=%d", outputPath, user.ID, len(cartItems), len(reco))
+	log.Printf("preview job written: path=%s user_id=%s cart_items=%d historical_item=%q reco_items=%d", outputPath, user.ID, len(cartItems), historicalItem.Name, len(reco))
 }
 
 func findUserByID(ctx context.Context, dsn string, userID string) (domain.User, error) {

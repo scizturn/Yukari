@@ -13,6 +13,7 @@ type LeftoverCartStore interface {
 	LeftoverCartUsers(ctx context.Context, now time.Time) ([]domain.User, error)
 	CartItems(ctx context.Context, userID string) ([]domain.WishlistItem, error)
 	LeftoverCartReco(ctx context.Context, userID string) ([]domain.FYPItem, error)
+	HistoricalOrders(ctx context.Context, userID string) ([]domain.HistoricalItem, error)
 	Popular(ctx context.Context) ([]domain.FYPItem, error)
 }
 
@@ -42,11 +43,6 @@ func (r LeftoverCartReader) Run(ctx context.Context, now time.Time) (int, error)
 		return 0, err
 	}
 
-	popular, err := r.store.Popular(ctx)
-	if err != nil {
-		return 0, err
-	}
-
 	enqueued := 0
 	for _, user := range users {
 		cartItems, err := r.store.CartItems(ctx, user.ID)
@@ -60,23 +56,35 @@ func (r LeftoverCartReader) Run(ctx context.Context, now time.Time) (int, error)
 			continue
 		}
 
-		reco, err := r.store.LeftoverCartReco(ctx, user.ID)
+		historicalItem, err := r.leftoverCartHistoricalItem(ctx, user.ID)
 		if err != nil {
 			return enqueued, err
 		}
-		// fallback: fill reco with popular items if no series match found
-		if len(reco) < 3 {
-			reco = FillRecoFromPopular(reco, popular, 3)
+		var reco []domain.FYPItem
+		if historicalItem.Name != "" {
+			reco, err = r.store.LeftoverCartReco(ctx, user.ID)
+			if err != nil {
+				return enqueued, err
+			}
+			// fallback only when we have an order-history anchor.
+			if len(reco) < 3 {
+				popular, err := r.store.Popular(ctx)
+				if err != nil {
+					return enqueued, err
+				}
+				reco = FillRecoFromPopular(reco, popular, 3)
+			}
 		}
 
 		job := domain.LeftoverCartJob{
-			ID:        fmt.Sprintf("leftover-cart-%s-user-%s", now.Format("2006-01-02"), user.ID),
-			UserID:    user.ID,
-			Date:      now,
-			User:      user,
-			CartItems: cartItems,
-			RecoItems: reco,
-			Attempt:   1,
+			ID:             fmt.Sprintf("leftover-cart-%s-user-%s", now.Format("2006-01-02"), user.ID),
+			UserID:         user.ID,
+			Date:           now,
+			User:           user,
+			HistoricalItem: historicalItem,
+			CartItems:      cartItems,
+			RecoItems:      reco,
+			Attempt:        1,
 		}
 		if err := r.insertQueued(ctx, job); err != nil {
 			return enqueued, err
@@ -112,6 +120,17 @@ func FillRecoFromPopular(reco []domain.FYPItem, popular []domain.FYPItem, limit 
 	return reco
 }
 
+func (r LeftoverCartReader) leftoverCartHistoricalItem(ctx context.Context, userID string) (domain.HistoricalItem, error) {
+	orders, err := r.store.HistoricalOrders(ctx, userID)
+	if err != nil {
+		return domain.HistoricalItem{}, err
+	}
+	if len(orders) == 0 {
+		return domain.HistoricalItem{}, nil
+	}
+	return orders[len(orders)-1], nil
+}
+
 func (r LeftoverCartReader) insertQueued(ctx context.Context, job domain.LeftoverCartJob) error {
 	if r.audit == nil {
 		return nil
@@ -126,6 +145,7 @@ func (r LeftoverCartReader) insertQueued(ctx context.Context, job domain.Leftove
 		Feature:     audit.FeatureLeftoverCart,
 		Metadata: map[string]any{
 			"cart_item_count": len(job.CartItems),
+			"historical_item": job.HistoricalItem.Name,
 			"reco_item_count": len(job.RecoItems),
 		},
 	})

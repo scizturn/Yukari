@@ -52,26 +52,38 @@ func runLeftoverCart() {
 		log.Printf("warning: no available cart items for user %s; forcing with empty cart", user.ID)
 	}
 
-	reco, err := store.LeftoverCartReco(ctx, user.ID)
+	orders, err := store.HistoricalOrders(ctx, user.ID)
 	if err != nil {
-		log.Fatalf("read reco items: %v", err)
+		log.Fatalf("read historical orders: %v", err)
 	}
-	if len(reco) < 3 {
-		popular, err := store.Popular(ctx)
+	var historicalItem domain.HistoricalItem
+	if len(orders) > 0 {
+		historicalItem = orders[len(orders)-1]
+	}
+	var reco []domain.FYPItem
+	if historicalItem.Name != "" {
+		reco, err = store.LeftoverCartReco(ctx, user.ID)
 		if err != nil {
-			log.Fatalf("read popular: %v", err)
+			log.Fatalf("read reco items: %v", err)
 		}
-		reco = reader.FillRecoFromPopular(reco, popular, 3)
+		if len(reco) < 3 {
+			popular, err := store.Popular(ctx)
+			if err != nil {
+				log.Fatalf("read popular: %v", err)
+			}
+			reco = reader.FillRecoFromPopular(reco, popular, 3)
+		}
 	}
 
 	job := domain.LeftoverCartJob{
-		ID:        fmt.Sprintf("force-leftover-cart-%s-user-%s", now.Format("2006-01-02-150405"), user.ID),
-		UserID:    user.ID,
-		Date:      now,
-		User:      user,
-		CartItems: cartItems,
-		RecoItems: reco,
-		Attempt:   1,
+		ID:             fmt.Sprintf("force-leftover-cart-%s-user-%s", now.Format("2006-01-02-150405"), user.ID),
+		UserID:         user.ID,
+		Date:           now,
+		User:           user,
+		HistoricalItem: historicalItem,
+		CartItems:      cartItems,
+		RecoItems:      reco,
+		Attempt:        1,
 	}
 
 	redisQueue := queue.NewRedisQueue(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB, cfg.QueueName)
@@ -85,13 +97,14 @@ func runLeftoverCart() {
 		log.Fatalf("enqueue force job: %v", err)
 	}
 
-	log.Printf("forced leftover cart job enqueued: queue=%s job_id=%s user_id=%s name=%q email=%s cart_items=%d reco_items=%d",
+	log.Printf("forced leftover cart job enqueued: queue=%s job_id=%s user_id=%s name=%q email=%s cart_items=%d historical_item=%q reco_items=%d",
 		cfg.LeftoverCartQueueName,
 		job.ID,
 		user.ID,
 		user.Name,
 		maskEmail(user.Email),
 		len(cartItems),
+		historicalItem.Name,
 		len(reco),
 	)
 }

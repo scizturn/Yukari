@@ -79,13 +79,14 @@ type Voucher struct {
 }
 
 type LeftoverCartJob struct {
-	ID        string         `json:"job_id"`
-	UserID    string         `json:"user_id"`
-	Date      time.Time      `json:"date"`
-	User      User           `json:"user"`
-	CartItems []WishlistItem `json:"cart_items"`
-	RecoItems []FYPItem      `json:"reco_items"`
-	Attempt   int            `json:"attempt"`
+	ID             string         `json:"job_id"`
+	UserID         string         `json:"user_id"`
+	Date           time.Time      `json:"date"`
+	User           User           `json:"user"`
+	HistoricalItem HistoricalItem `json:"historical_item"`
+	CartItems      []WishlistItem `json:"cart_items"`
+	RecoItems      []FYPItem      `json:"reco_items"`
+	Attempt        int            `json:"attempt"`
 }
 
 type DiscountedWishlistItem struct {
@@ -104,16 +105,16 @@ type DiscountedWishlistItem struct {
 }
 
 type WinbackJob struct {
-	ID             string          `json:"job_id"`
-	UserID         string          `json:"user_id"`
-	Date           time.Time       `json:"date"`
-	User           User            `json:"user"`
-	VoucherCode    string          `json:"voucher_code,omitempty"`
-	VoucherID      int64           `json:"voucher_id,omitempty"`
-	WishlistItems  []WishlistItem  `json:"wishlist_items"`
-	HistoricalItem HistoricalItem  `json:"historical_item"`
-	PopularItems   []FYPItem       `json:"popular_items"`
-	Attempt        int             `json:"attempt"`
+	ID             string         `json:"job_id"`
+	UserID         string         `json:"user_id"`
+	Date           time.Time      `json:"date"`
+	User           User           `json:"user"`
+	VoucherCode    string         `json:"voucher_code,omitempty"`
+	VoucherID      int64          `json:"voucher_id,omitempty"`
+	WishlistItems  []WishlistItem `json:"wishlist_items"`
+	HistoricalItem HistoricalItem `json:"historical_item"`
+	PopularItems   []FYPItem      `json:"popular_items"`
+	Attempt        int            `json:"attempt"`
 }
 
 type DiscountedWishlistJob struct {

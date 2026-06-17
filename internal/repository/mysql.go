@@ -205,7 +205,7 @@ func (s *MySQLStore) CartItems(ctx context.Context, userID string) ([]domain.Wis
 }
 
 func (s *MySQLStore) LeftoverCartReco(ctx context.Context, userID string) ([]domain.FYPItem, error) {
-	return s.fypRows(ctx, s.queries["leftover_cart_reco"], userID, userID)
+	return s.fypRows(ctx, s.queries["leftover_cart_reco"], userID, userID, userID)
 }
 
 func (s *MySQLStore) DiscountedWishlistUsers(ctx context.Context, now time.Time) ([]domain.User, error) {
