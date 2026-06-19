@@ -1,6 +1,7 @@
 SELECT
   CAST(i.item_id AS CHAR)                                          AS id,
   i.name,
+  COALESCE(i.character_name, '')                                   AS character_name,
   CONCAT('https://kyou.id/items/', i.item_id, '/')                AS url,
   COALESCE(CONCAT('https://kyoucdn.id/', img.path, '.webp'), '')  AS image_url,
   ip.price                                                         AS original_price,

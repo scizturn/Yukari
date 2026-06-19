@@ -92,6 +92,7 @@ type LeftoverCartJob struct {
 type DiscountedWishlistItem struct {
 	ID            string     `json:"id"`
 	Name          string     `json:"name"`
+	CharacterName string     `json:"character_name"`
 	URL           string     `json:"url"`
 	ImageURL      string     `json:"image_url"`
 	OriginalPrice int        `json:"original_price"`

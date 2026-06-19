@@ -249,7 +249,7 @@ func (s *MySQLStore) discountedWishlistRows(ctx context.Context, query string, i
 		var discountPrice sql.NullInt64
 		var discountName sql.NullString
 		var discountEnd sql.NullTime
-		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.ImageURL, &item.OriginalPrice, &discountPrice, &discountName, &discountEnd, &item.Status, &item.Manufacturer, &item.SeriesName); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.CharacterName, &item.URL, &item.ImageURL, &item.OriginalPrice, &discountPrice, &discountName, &discountEnd, &item.Status, &item.Manufacturer, &item.SeriesName); err != nil {
 			return nil, err
 		}
 		item.DiscountPrice = int(discountPrice.Int64)
