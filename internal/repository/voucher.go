@@ -214,6 +214,101 @@ INSERT INTO voucher_pricing_aliases (
 	return domain.Voucher{ID: voucherID, Code: code}, nil
 }
 
+func (c *MySQLVoucherCreator) CreateWishlistBackInVoucher(ctx context.Context, user domain.User, campaignDate time.Time, itemIDs []string) (domain.Voucher, error) {
+	if !c.cfg.PricingVoucherID.Valid && strings.TrimSpace(c.cfg.PricingVoucherCode) == "" {
+		return domain.Voucher{}, fmt.Errorf("wishlist back in pricing voucher id or code is required")
+	}
+	if strings.TrimSpace(user.ID) == "" {
+		return domain.Voucher{}, fmt.Errorf("wishlist back in voucher user id is required")
+	}
+
+	code := c.wishlistBackInVoucherCode(user.ID, campaignDate)
+	tx, err := c.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Voucher{}, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	existing, found, err := voucherByCode(ctx, tx, code)
+	if err != nil {
+		return domain.Voucher{}, err
+	}
+	if found {
+		if err = tx.Commit(); err != nil {
+			return domain.Voucher{}, err
+		}
+		existing.Existed = true
+		return existing, nil
+	}
+
+	pricingVoucherID := c.cfg.PricingVoucherID.Value
+	if !c.cfg.PricingVoucherID.Valid {
+		err = tx.QueryRowContext(ctx, `
+SELECT id
+FROM vouchers
+WHERE code = ?
+LIMIT 1`, c.cfg.PricingVoucherCode).Scan(&pricingVoucherID)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return domain.Voucher{}, fmt.Errorf("pricing voucher %q not found", c.cfg.PricingVoucherCode)
+			}
+			return domain.Voucher{}, err
+		}
+	}
+
+	startAt := campaignDate
+	expiredAt := campaignDate.AddDate(0, 0, c.cfg.DurationDays.Value)
+	requiresClaim := boolInt(c.cfg.RequiresClaim.Value)
+	result, err := tx.ExecContext(ctx, `
+INSERT INTO vouchers (
+  code, name, description, type, amount, max_discount, min_purchase,
+  distribution, requires_claim, max_claim_total, start_at, expired_at,
+  usage_limit_total, usage_limit_per_user, is_active, claim_animation,
+  created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NOW(), NOW())`,
+		code, c.voucherName(), stringPtrValue(c.cfg.Description), c.cfg.Type,
+		c.cfg.Amount.Value, c.cfg.MaxDiscount.sqlValue(), c.cfg.MinPurchase.Value,
+		c.cfg.Distribution, requiresClaim, c.cfg.MaxClaimTotal.sqlValue(), startAt,
+		expiredAt, c.cfg.UsageLimitTotal.sqlValue(), c.cfg.UsageLimitPerUser.Value,
+		stringPtrValue(c.cfg.ClaimAnimation),
+	)
+	if err != nil {
+		return domain.Voucher{}, err
+	}
+	voucherID, err := result.LastInsertId()
+	if err != nil {
+		return domain.Voucher{}, err
+	}
+
+	_, err = tx.ExecContext(ctx, `
+INSERT INTO voucher_pricing_aliases (
+  voucher_id, pricing_voucher_id, alias_mode, created_at, updated_at
+) VALUES (?, ?, 'pricing_only', NOW(), NOW())`, voucherID, pricingVoucherID)
+	if err != nil {
+		return domain.Voucher{}, err
+	}
+	if err = insertRule(ctx, tx, voucherID, "user", []string{user.ID}, "include"); err != nil {
+		return domain.Voucher{}, err
+	}
+	if err = c.insertConfiguredRules(ctx, tx, voucherID, user.ID, itemIDs); err != nil {
+		return domain.Voucher{}, err
+	}
+	if err = c.insertConfiguredBusinessRules(ctx, tx, voucherID, user.ID, itemIDs); err != nil {
+		return domain.Voucher{}, err
+	}
+	if err = c.insertBasicInfoRules(ctx, tx, voucherID); err != nil {
+		return domain.Voucher{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return domain.Voucher{}, err
+	}
+	return domain.Voucher{ID: voucherID, Code: code}, nil
+}
+
 func (c *MySQLVoucherCreator) CreateAnniversaryVoucher(ctx context.Context, user domain.User, anniversaryDate time.Time, itemIDs []string) (domain.Voucher, error) {
 	if !c.cfg.PricingVoucherID.Valid && strings.TrimSpace(c.cfg.PricingVoucherCode) == "" {
 		return domain.Voucher{}, fmt.Errorf("anniversary pricing voucher id or code is required")
@@ -475,6 +570,19 @@ func (c *MySQLVoucherCreator) winbackVoucherCode(userID string, date time.Time) 
 		return "WB" + code[:14]
 	}
 	return code
+}
+
+func (c *MySQLVoucherCreator) wishlistBackInVoucherCode(userID string, date time.Time) string {
+	year, week := date.ISOWeek()
+	key := fmt.Sprintf("wishlist-back-in:%d-W%02d:user:%s", year, week, cleanCodePart(userID))
+	secret := c.codeSecret
+	if secret == "" {
+		secret = "preview-only"
+	}
+	hash := hmac.New(sha256.New, []byte(secret))
+	_, _ = hash.Write([]byte(key))
+	code := strings.TrimRight(base32.StdEncoding.EncodeToString(hash.Sum(nil)), "=")[:13]
+	return "WBI" + code
 }
 
 func (cfg BirthdayVoucherConfig) withDefaults() BirthdayVoucherConfig {

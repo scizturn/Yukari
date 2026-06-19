@@ -88,3 +88,22 @@ func buildWinbackVoucherCreator(cfg config.Config) (*repository.MySQLVoucherCrea
 	}
 	return repository.OpenMySQLVoucherCreator(cfg.DatabaseDSN, voucherCfg, cfg.VoucherCodeSecret)
 }
+
+func buildWishlistBackInVoucherCreator(cfg config.Config) (*repository.MySQLVoucherCreator, error) {
+	voucherCfg, err := repository.LoadBirthdayVoucherConfig(cfg.WishlistBackInVoucherConfigPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("wishlist back in voucher config %s not found; enqueuing without vouchers", cfg.WishlistBackInVoucherConfigPath)
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !voucherCfg.PricingVoucherID.Valid && strings.TrimSpace(voucherCfg.PricingVoucherCode) == "" {
+		log.Printf("wishlist back in voucher config %s has no pricing voucher id or code; enqueuing without vouchers", cfg.WishlistBackInVoucherConfigPath)
+		return nil, nil
+	}
+	if strings.TrimSpace(cfg.DatabaseDSN) == "" {
+		return nil, nil
+	}
+	return repository.OpenMySQLVoucherCreator(cfg.DatabaseDSN, voucherCfg, cfg.VoucherCodeSecret)
+}

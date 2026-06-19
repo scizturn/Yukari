@@ -145,3 +145,26 @@ func TestDiscountedWishlistFillOnlyIncludesActiveDiscounts(t *testing.T) {
 		}
 	}
 }
+
+func TestWishlistBackInQueriesEnforceCampaignRules(t *testing.T) {
+	query, err := NewLoader("../../data/sql").Read("wishlist_back_in_items")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"sl.is_restock = 1",
+		"sl.type = 'increase'",
+		"sl.description = 'Increased via Insert Stock (Adjusment)'",
+		"'$.before_all_stock'",
+		"'$.after_all_stock'",
+		"i.status = 'ready'",
+		"i.stock > 0",
+		"COUNT(DISTINCT w.user_id)",
+		"edl.feature = 'wishlist_back_in'",
+		"LIMIT 5",
+	} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("expected wishlist back in query to contain %q", want)
+		}
+	}
+}

@@ -28,7 +28,7 @@ func OpenMySQLStore(dsn string, loader sqlfiles.Loader) (*MySQLStore, error) {
 }
 
 func NewMySQLStore(db *sql.DB, loader sqlfiles.Loader) (*MySQLStore, error) {
-	names := []string{"birthday_users", "wishlist_items", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill", "winback_users"}
+	names := []string{"birthday_users", "wishlist_items", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill", "winback_users", "wishlist_back_in_items", "wishlist_back_in_users", "wishlist_back_in_companion", "wishlist_back_in_preview_item"}
 	queries := make(map[string]string, len(names))
 	for _, name := range names {
 		query, err := loader.Read(name)
@@ -259,6 +259,63 @@ func (s *MySQLStore) discountedWishlistRows(ctx context.Context, query string, i
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func (s *MySQLStore) WishlistBackInItems(ctx context.Context, startAt, endAt time.Time) ([]domain.WishlistBackInItem, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["wishlist_back_in_items"], startAt, endAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []domain.WishlistBackInItem
+	for rows.Next() {
+		var item domain.WishlistBackInItem
+		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.ImageURL, &item.Price, &item.Status, &item.Manufacturer, &item.SeriesName, &item.CategoryName, &item.PopularScore, &item.RestockedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *MySQLStore) WishlistBackInUsers(ctx context.Context, itemID string) ([]domain.User, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["wishlist_back_in_users"], itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []domain.User
+	for rows.Next() {
+		var user domain.User
+		if err := rows.Scan(&user.ID, &user.Name, &user.Email, &user.IsActive); err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	return users, rows.Err()
+}
+
+func (s *MySQLStore) WishlistBackInPreviewItem(ctx context.Context, userID string, startAt, endAt time.Time) (domain.WishlistBackInItem, error) {
+	var item domain.WishlistBackInItem
+	err := s.db.QueryRowContext(ctx, s.queries["wishlist_back_in_preview_item"], userID, startAt, endAt).Scan(
+		&item.ID, &item.Name, &item.URL, &item.ImageURL, &item.Price, &item.Status,
+		&item.Manufacturer, &item.SeriesName, &item.CategoryName, &item.PopularScore, &item.RestockedAt,
+	)
+	return item, err
+}
+
+func (s *MySQLStore) WishlistBackInCompanion(ctx context.Context, userID, itemID string) (domain.WishlistBackInItem, error) {
+	var item domain.WishlistBackInItem
+	err := s.db.QueryRowContext(ctx, s.queries["wishlist_back_in_companion"], itemID, userID).Scan(
+		&item.ID, &item.Name, &item.URL, &item.ImageURL, &item.Price, &item.Status,
+		&item.Manufacturer, &item.SeriesName, &item.CategoryName, &item.PopularScore, &item.RestockedAt,
+	)
+	if err == sql.ErrNoRows {
+		return domain.WishlistBackInItem{}, nil
+	}
+	return item, err
 }
 
 func (s *MySQLStore) WinbackUsers(ctx context.Context, now time.Time) ([]domain.User, error) {

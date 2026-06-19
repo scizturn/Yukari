@@ -69,3 +69,11 @@ func (q *RedisQueue) EnqueueDiscountedWishlistTo(ctx context.Context, queueName 
 	}
 	return q.client.RPush(ctx, queueName, payload).Err()
 }
+
+func (q *RedisQueue) EnqueueWishlistBackInTo(ctx context.Context, queueName string, job domain.WishlistBackInJob) error {
+	payload, err := EncodeWishlistBackInJob(job)
+	if err != nil {
+		return err
+	}
+	return q.client.RPush(ctx, queueName, payload).Err()
+}

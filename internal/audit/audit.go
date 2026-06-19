@@ -13,10 +13,11 @@ import (
 const (
 	FeatureBirthdayVoucher    = "birthday_voucher"
 	FeatureAnniversaryVoucher = "anniversary_voucher"
-	FeatureLeftoverCart          = "leftover_cart"
-	FeatureDiscountedWishlist    = "discounted_wishlist"
-	FeatureWinback               = "winback"
-	ProviderKirimEmail           = "kirim.email"
+	FeatureLeftoverCart       = "leftover_cart"
+	FeatureDiscountedWishlist = "discounted_wishlist"
+	FeatureWinback            = "winback"
+	FeatureWishlistBackIn     = "wishlist_back_in"
+	ProviderKirimEmail        = "kirim.email"
 )
 
 type Logger struct {

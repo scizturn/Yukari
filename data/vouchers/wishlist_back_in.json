@@ -1,0 +1,27 @@
+{
+  "code_prefix": "BACKIN",
+  "name": "Wishlist Back In",
+  "description": "Voucher dua minggu untuk item wishlist yang tersedia kembali.",
+  "type": "discount_percent",
+  "amount": "10",
+  "max_discount": "100000",
+  "min_purchase": "0",
+  "distribution": "manual",
+  "requires_claim": 1,
+  "usage_limit_total": null,
+  "max_claim_total": "1",
+  "usage_limit_per_user": "1",
+  "claim_animation": "envelope",
+  "duration_days": 14,
+  "pricing_voucher_id": null,
+  "rules": [],
+  "business_rules": [],
+  "basic_info": {
+    "item_types": ["ready"],
+    "user_roles": ["user"],
+    "is_partner": 0,
+    "specific_user_ids": "",
+    "account_age_min": "",
+    "account_age_max": ""
+  }
+}
