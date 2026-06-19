@@ -127,3 +127,21 @@ func TestBirthdayItemQueriesShapeWishlistAndRecommendations(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscountedWishlistFillOnlyIncludesActiveDiscounts(t *testing.T) {
+	query, err := NewLoader("../../data/sql").Read("discounted_wishlist_fill")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{
+		"i.discount_name IS NOT NULL AND i.discount_name != ''",
+		"i.discount_end_date >= CURRENT_DATE",
+		"i.discount_price > 0",
+		"i.discount_price < ip.price",
+	} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("expected discounted wishlist fill query to contain %q, got %q", want, query)
+		}
+	}
+}

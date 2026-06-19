@@ -33,6 +33,10 @@ AND i.status        = 'ready'
 AND i.stock         > 0
 AND i.is_available  = 1
 AND COALESCE(i.isAdult, 0) = 0
+AND i.discount_name IS NOT NULL AND i.discount_name != ''
+AND i.discount_end_date >= CURRENT_DATE
+AND i.discount_price > 0
+AND i.discount_price < ip.price
 AND i.item_id NOT IN (
   SELECT item_id FROM wishlists WHERE user_id = ?
 )
