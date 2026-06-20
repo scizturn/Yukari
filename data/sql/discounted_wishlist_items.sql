@@ -27,6 +27,9 @@ WHERE w.user_id         = ?
   AND i.discount_end_date >= CURRENT_DATE
   AND i.stock           > 0
   AND i.is_available    = 1
+  AND i.status          = 'ready'
   AND COALESCE(i.isAdult, 0) = 0
+  AND i.discount_price  > 0
+  AND i.discount_price  < ip.price
 ORDER BY i.view_count DESC, w.created_at DESC
 LIMIT 12

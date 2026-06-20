@@ -146,6 +146,32 @@ func TestDiscountedWishlistFillOnlyIncludesActiveDiscounts(t *testing.T) {
 	}
 }
 
+func TestDiscountedWishlistQueriesRequireSendableDiscounts(t *testing.T) {
+	loader := NewLoader("../../data/sql")
+	for _, name := range []string{"discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill"} {
+		query, err := loader.Read(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{
+			"i.status = 'ready'",
+			"i.stock > 0",
+			"i.is_available = 1",
+			"COALESCE(i.isAdult, 0) = 0",
+			"i.discount_price > 0",
+			"i.discount_price < ip.price",
+		} {
+			if !strings.Contains(compactSQL(query), compactSQL(want)) {
+				t.Fatalf("expected %s query to contain %q, got %q", name, want, query)
+			}
+		}
+	}
+}
+
+func compactSQL(query string) string {
+	return strings.Join(strings.Fields(query), " ")
+}
+
 func TestWishlistBackInQueriesEnforceCampaignRules(t *testing.T) {
 	query, err := NewLoader("../../data/sql").Read("wishlist_back_in_items")
 	if err != nil {

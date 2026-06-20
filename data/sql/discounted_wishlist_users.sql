@@ -6,12 +6,16 @@ SELECT DISTINCT
 FROM users u
 JOIN wishlists w  ON w.user_id  = u.user_id
 JOIN items     i  ON i.item_id  = w.item_id
+JOIN item_products ip ON ip.item_id = i.item_id
 WHERE i.discount_start_date = DATE_SUB(DATE(?), INTERVAL 1 DAY)
   AND i.discount_end_date   >= DATE(?)
   AND i.discount_name IS NOT NULL AND i.discount_name != ''
   AND i.stock        >  0
   AND i.is_available =  1
+  AND i.status       = 'ready'
   AND COALESCE(i.isAdult, 0) = 0
+  AND i.discount_price > 0
+  AND i.discount_price < ip.price
   AND u.email_verified_at IS NOT NULL
   AND NOT EXISTS (
     SELECT 1

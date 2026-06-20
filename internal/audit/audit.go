@@ -156,6 +156,29 @@ ON DUPLICATE KEY UPDATE
 	return err
 }
 
+func (l *Logger) MarkEnqueueFailed(ctx context.Context, jobID string, attempt int, reason string) error {
+	if l == nil {
+		return nil
+	}
+	if attempt <= 0 {
+		attempt = 1
+	}
+	_, err := l.db.ExecContext(ctx, `
+UPDATE email_delivery_logs
+SET
+  status = 'failed',
+  failure_reason = ?,
+  failed_at = NOW(),
+  updated_at = NOW()
+WHERE job_id = ?
+  AND attempt = ?`,
+		reason,
+		jobID,
+		attempt,
+	)
+	return err
+}
+
 func (l *Logger) HasBirthdayVoucherEmailInYear(ctx context.Context, userID string, year int) (bool, error) {
 	if l == nil {
 		return false, nil

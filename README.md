@@ -123,11 +123,13 @@ Pastikan migrasi `email_delivery_logs` sudah terpasang dan queue name sama persi
 
 ### Production readiness
 
-Belum siap untuk enable mass-send. Blocker yang masih harus dibereskan:
+Code blocker discounted wishlist sudah ditangani:
 
-- audit `queued` saat ini ditulis **sebelum** Redis enqueue; kegagalan Redis dapat membuat user tersuppress selama 7 hari walaupun job tidak pernah masuk queue;
-- query item wishlist belum mewajibkan `status='ready'` dan belum memvalidasi `discount_price > 0 AND discount_price < original_price`, berbeda dengan query fill;
-- belum ada unit test reader discounted wishlist untuk eligibility, empty-item skip, urutan audit/enqueue, dan error handling.
+- audit dibuat sebelum enqueue agar Makoto selalu mempunyai row untuk update; jika Redis enqueue gagal, status langsung dikompensasi menjadi `failed` sehingga tidak ikut suppression 7 hari;
+- query user, wishlist item, dan fill sama-sama mewajibkan item `ready`, stok/availability valid, non-adult, dan `0 < discount_price < original_price`;
+- unit test reader mencakup payload sukses, empty-item skip, dan kompensasi audit ketika enqueue gagal.
+
+Release mass-send tetap menunggu checklist operasional Makoto: preference center nyata, seed send, inbox rendering, dan konfigurasi provider unsubscribe/suppression.
 
 ## Voucher
 
@@ -146,6 +148,7 @@ Yukari menulis ke `email_delivery_logs` saat job di-enqueue (`status=queued`) da
 
 - `birthday_voucher` — untuk birthday
 - `anniversary_voucher` — untuk anniversary
+- `discounted_wishlist` — cooldown 7 hari untuk discounted wishlist; hanya `queued`, `sending`, dan `sent` yang menekan pengiriman berikutnya
 
 ## Coolify Scheduled Tasks
 

@@ -2,6 +2,7 @@ package reader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -22,6 +23,7 @@ type DiscountedWishlistQueue interface {
 type DiscountedWishlistAuditLogger interface {
 	InsertQueued(ctx context.Context, email audit.QueuedEmail) error
 	InsertSkipped(ctx context.Context, email audit.SkippedEmail) error
+	MarkEnqueueFailed(ctx context.Context, jobID string, attempt int, reason string) error
 }
 
 type DiscountedWishlistReader struct {
@@ -73,12 +75,20 @@ func (r DiscountedWishlistReader) Run(ctx context.Context, now time.Time) (int, 
 			return enqueued, err
 		}
 		if err := r.queue.EnqueueDiscountedWishlistTo(ctx, r.queueName, job); err != nil {
-			return enqueued, err
+			markErr := r.markEnqueueFailed(ctx, job, err)
+			return enqueued, errors.Join(err, markErr)
 		}
 		enqueued++
 	}
 
 	return enqueued, nil
+}
+
+func (r DiscountedWishlistReader) markEnqueueFailed(ctx context.Context, job domain.DiscountedWishlistJob, enqueueErr error) error {
+	if r.audit == nil {
+		return nil
+	}
+	return r.audit.MarkEnqueueFailed(ctx, job.ID, job.Attempt, "redis enqueue failed: "+enqueueErr.Error())
 }
 
 func (r DiscountedWishlistReader) insertQueued(ctx context.Context, job domain.DiscountedWishlistJob, wishlistCount, fillCount int) error {
