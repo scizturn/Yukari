@@ -1,27 +1,32 @@
 {
-  "name": "Selamat Kembali!",
+  "name": "Returning User 🎉",
   "description": "Voucher spesial untuk kamu yang kembali ke Kyou.",
   "type": "discount_percent",
-  "amount": "10",
-  "max_discount": "100000",
-  "min_purchase": "0",
+  "amount": "12",
+  "max_discount": "130000",
+  "min_purchase": "300000",
   "distribution": "manual",
   "requires_claim": 1,
   "is_active": 1,
   "usage_limit_total": null,
-  "max_claim_total": "1",
+  "max_claim_total": null,
   "usage_limit_per_user": "1",
-  "claim_animation": "envelope",
-  "duration_days": 30,
-  "pricing_voucher_id": null,
-  "rules": [],
-  "business_rules": [],
+  "claim_animation": "treasure-chest",
+  "duration_days": 14,
+  "pricing_voucher_id": "8101",
+  "rules": [
+    { "type": "item_age_min", "operator": "include", "value": "60" },
+    { "type": "item_remaining_life_min", "operator": "include", "value": "90" }
+  ],
+  "business_rules": [
+    { "type": "gp_ratio_min", "operator": "include", "value": "45" }
+  ],
   "basic_info": {
     "item_types": ["ready"],
     "user_roles": ["user"],
     "is_partner": 0,
     "specific_user_ids": "",
-    "account_age_min": "",
+    "account_age_min": "120",
     "account_age_max": ""
   }
 }
