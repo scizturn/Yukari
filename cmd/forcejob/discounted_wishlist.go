@@ -27,12 +27,12 @@ func runDiscountedWishlist() {
 	}
 	now := time.Now().In(location)
 
-	userID := env("YUKARI_FORCE_USER", "")
-	if userID == "" {
-		log.Fatal("YUKARI_FORCE_USER is required")
+	needle := env("YUKARI_FORCE_USER", "")
+	if needle == "" {
+		log.Fatal("YUKARI_FORCE_USER is required (user_id, email, name, or username)")
 	}
 
-	user, err := findUserByID(ctx, cfg.DatabaseDSN, userID)
+	user, _, err := findUserByNeedle(ctx, cfg.DatabaseDSN, needle)
 	if err != nil {
 		log.Fatal(err)
 	}
