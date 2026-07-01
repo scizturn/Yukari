@@ -21,6 +21,7 @@ type WishlistItem struct {
 	SeriesName   string     `json:"series_name"`
 	PODeadline   *time.Time `json:"po_deadline,omitempty"`
 	POReleaseAt  *time.Time `json:"po_release_at,omitempty"`
+	IsWishlisted bool       `json:"is_wishlisted,omitempty"`
 }
 
 type FYPItem struct {

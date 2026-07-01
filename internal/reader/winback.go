@@ -3,11 +3,41 @@ package reader
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kyou-id/yukari/internal/audit"
 	"github.com/kyou-id/yukari/internal/domain"
 )
+
+// FillWishlistReadyTo pads the wishlist up to target using ready fill items
+// (most-popular ready), keeping the user's own wishlist first, de-duplicating by
+// ID and skipping anything not ready.
+func FillWishlistReadyTo(wishlist []domain.WishlistItem, target int, fill []domain.FYPItem) []domain.WishlistItem {
+	seen := make(map[string]bool, len(wishlist))
+	for i := range wishlist {
+		wishlist[i].IsWishlisted = true // the user's own wishlist items get the orange border
+		if wishlist[i].ID != "" {
+			seen[wishlist[i].ID] = true
+		}
+	}
+	for _, p := range fill {
+		if len(wishlist) >= target {
+			break
+		}
+		if p.ID != "" && seen[p.ID] {
+			continue
+		}
+		if !strings.EqualFold(p.Status, "ready") {
+			continue
+		}
+		if p.ID != "" {
+			seen[p.ID] = true
+		}
+		wishlist = append(wishlist, fypToWishlist(p))
+	}
+	return wishlist
+}
 
 type WinbackStore interface {
 	WinbackUsers(ctx context.Context, now time.Time) ([]domain.User, error)
@@ -15,7 +45,12 @@ type WinbackStore interface {
 	HistoricalOrders(ctx context.Context, userID string) ([]domain.HistoricalItem, error)
 	Popular(ctx context.Context) ([]domain.FYPItem, error)
 	FYP(ctx context.Context, userID string) ([]domain.FYPItem, error)
+	WinbackFillItems(ctx context.Context) ([]domain.FYPItem, error)
 }
+
+// winbackReadyTarget is how many ready items the winback wishlist grid shows:
+// the user's own wishlist first, then most-popular ready items to fill.
+const winbackReadyTarget = 12
 
 type WinbackQueue interface {
 	EnqueueWinbackTo(ctx context.Context, queueName string, job domain.WinbackJob) error
@@ -54,6 +89,11 @@ func (r WinbackReader) Run(ctx context.Context, now time.Time) (int, error) {
 		return 0, err
 	}
 
+	fillItems, err := r.store.WinbackFillItems(ctx)
+	if err != nil {
+		return 0, err
+	}
+
 	enqueued := 0
 	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	for _, user := range users {
@@ -61,11 +101,7 @@ func (r WinbackReader) Run(ctx context.Context, now time.Time) (int, error) {
 		if err != nil {
 			return enqueued, err
 		}
-		fyp, err := r.store.FYP(ctx, user.ID)
-		if err != nil {
-			return enqueued, err
-		}
-		wishlist = FillWishlistToSix(wishlist, fyp, popular)
+		wishlist = FillWishlistReadyTo(wishlist, winbackReadyTarget, fillItems)
 
 		var voucher domain.Voucher
 		if r.vouchers != nil {
@@ -130,10 +166,10 @@ func (r WinbackReader) insertQueued(ctx context.Context, job domain.WinbackJob) 
 		ReferenceID: job.UserID,
 		Feature:     audit.FeatureWinback,
 		Metadata: map[string]any{
-			"voucher_id":       job.VoucherID,
-			"voucher_code":     job.VoucherCode,
-			"claim_url":        claimURL,
-			"historical_item":  job.HistoricalItem.Name,
+			"voucher_id":      job.VoucherID,
+			"voucher_code":    job.VoucherCode,
+			"claim_url":       claimURL,
+			"historical_item": job.HistoricalItem.Name,
 		},
 	})
 }

@@ -48,15 +48,15 @@ func runWinback() {
 	if err != nil {
 		log.Fatalf("read wishlist: %v", err)
 	}
-	fyp, err := store.FYP(ctx, user.ID)
-	if err != nil {
-		log.Fatalf("read fyp: %v", err)
-	}
 	popular, err := store.Popular(ctx)
 	if err != nil {
 		log.Fatalf("read popular: %v", err)
 	}
-	wishlist = reader.FillWishlistToSix(wishlist, fyp, popular)
+	fillItems, err := store.WinbackFillItems(ctx)
+	if err != nil {
+		log.Fatalf("read winback fill items: %v", err)
+	}
+	wishlist = reader.FillWishlistReadyTo(wishlist, 12, fillItems)
 
 	orders, err := store.HistoricalOrders(ctx, user.ID)
 	if err != nil {

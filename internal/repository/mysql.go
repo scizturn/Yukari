@@ -28,7 +28,7 @@ func OpenMySQLStore(dsn string, loader sqlfiles.Loader) (*MySQLStore, error) {
 }
 
 func NewMySQLStore(db *sql.DB, loader sqlfiles.Loader) (*MySQLStore, error) {
-	names := []string{"birthday_users", "wishlist_items", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill", "winback_users", "wishlist_back_in_items", "wishlist_back_in_users", "wishlist_back_in_companion", "wishlist_back_in_preview_item"}
+	names := []string{"birthday_users", "wishlist_items", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill", "winback_users", "winback_fill_items", "wishlist_back_in_items", "wishlist_back_in_users", "wishlist_back_in_companion", "wishlist_back_in_preview_item"}
 	queries := make(map[string]string, len(names))
 	for _, name := range names {
 		query, err := loader.Read(name)
@@ -141,6 +141,12 @@ func (s *MySQLStore) FYP(ctx context.Context, userID string) ([]domain.FYPItem, 
 
 func (s *MySQLStore) Popular(ctx context.Context) ([]domain.FYPItem, error) {
 	return s.fypRows(ctx, s.queries["popular_items"])
+}
+
+// WinbackFillItems returns the most-popular READY items used to fill the winback
+// wishlist grid up to 12.
+func (s *MySQLStore) WinbackFillItems(ctx context.Context) ([]domain.FYPItem, error) {
+	return s.fypRows(ctx, s.queries["winback_fill_items"])
 }
 
 func (s *MySQLStore) HasConverted(ctx context.Context, userID string, from time.Time, to time.Time) (bool, error) {
