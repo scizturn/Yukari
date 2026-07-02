@@ -41,7 +41,7 @@ func FillWishlistReadyTo(wishlist []domain.WishlistItem, target int, fill []doma
 
 type WinbackStore interface {
 	WinbackUsers(ctx context.Context, now time.Time) ([]domain.User, error)
-	Wishlist(ctx context.Context, userID string) ([]domain.WishlistItem, error)
+	WishlistWinback(ctx context.Context, userID string) ([]domain.WishlistItem, error)
 	HistoricalOrders(ctx context.Context, userID string) ([]domain.HistoricalItem, error)
 	Popular(ctx context.Context) ([]domain.FYPItem, error)
 	FYP(ctx context.Context, userID string) ([]domain.FYPItem, error)
@@ -123,7 +123,7 @@ func (r WinbackReader) Run(ctx context.Context, now time.Time) (int, error) {
 	enqueued := 0
 	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	for _, user := range users {
-		wishlist, err := r.store.Wishlist(ctx, user.ID)
+		wishlist, err := r.store.WishlistWinback(ctx, user.ID)
 		if err != nil {
 			return enqueued, err
 		}

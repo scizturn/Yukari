@@ -28,7 +28,7 @@ func OpenMySQLStore(dsn string, loader sqlfiles.Loader) (*MySQLStore, error) {
 }
 
 func NewMySQLStore(db *sql.DB, loader sqlfiles.Loader) (*MySQLStore, error) {
-	names := []string{"birthday_users", "wishlist_items", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill", "winback_users", "winback_fill_items", "wishlist_back_in_items", "wishlist_back_in_users", "wishlist_back_in_companion", "wishlist_back_in_preview_item"}
+	names := []string{"birthday_users", "wishlist_items", "wishlist_items_winback", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill", "winback_users", "winback_fill_items", "wishlist_back_in_items", "wishlist_back_in_users", "wishlist_back_in_companion", "wishlist_back_in_preview_item"}
 	queries := make(map[string]string, len(names))
 	for _, name := range names {
 		query, err := loader.Read(name)
@@ -107,6 +107,13 @@ func (s *MySQLStore) HistoricalOrders(ctx context.Context, userID string) ([]dom
 
 func (s *MySQLStore) Wishlist(ctx context.Context, userID string) ([]domain.WishlistItem, error) {
 	return s.wishlistRows(ctx, s.queries["wishlist_items"], userID)
+}
+
+// WishlistWinback returns up to 12 of the user's ready wishlist items (vs
+// Wishlist which is LIMIT 1 for birthday). Winback fills its grid with the
+// user's real wishlist first, so it needs more than one.
+func (s *MySQLStore) WishlistWinback(ctx context.Context, userID string) ([]domain.WishlistItem, error) {
+	return s.wishlistRows(ctx, s.queries["wishlist_items_winback"], userID)
 }
 
 func (s *MySQLStore) WishlistAnniversary(ctx context.Context, userID string) ([]domain.WishlistItem, error) {

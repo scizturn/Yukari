@@ -44,7 +44,7 @@ func runWinback() {
 		log.Fatalf("open store: %v", err)
 	}
 
-	wishlist, err := store.Wishlist(ctx, user.ID)
+	wishlist, err := store.WishlistWinback(ctx, user.ID)
 	if err != nil {
 		log.Fatalf("read wishlist: %v", err)
 	}
