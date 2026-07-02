@@ -156,11 +156,15 @@ Jalankan satu scheduled task per campaign. Untuk discounted wishlist:
 
 ```text
 Command: yukari discounted-wishlist
-Frequency: 0 17 * * *
+Frequency: 0 13 * * *
 Timeout: 300
 ```
 
-`0 17 * * *` = jam 17:00 UTC = jam 00:00 WIB. Jadwal tengah malam penting karena query memilih diskon yang mulai pada tanggal kemarin.
+`0 13 * * *` = jam 13:00 UTC = jam 20:00 WIB. Discounted wishlist nembak diskon
+yang **mulai di hari run** (`discount_start_date = DATE(now)`), jadi jalanin
+SORE/MALAM setelah diskon go-live — bukan tengah malam. Penting: jam 20:00 WIB =
+13:00 UTC, tanggal UTC & WIB masih sama; kalau ditaruh tengah malam (00:00 WIB =
+17:00 UTC hari sebelumnya) tanggalnya geser dan nggak nangkep diskon yang bener.
 
 Contoh task lama untuk birthday dan anniversary:
 
