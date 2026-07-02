@@ -55,9 +55,11 @@ const winbackReadyTarget = 12
 // winbackPastLimit caps how many past orders the "past collection" list shows.
 const winbackPastLimit = 3
 
-// recentHistoricalItems returns up to limit of the most-recent orders, newest
-// first, with DaysAgo computed relative to start. Input orders are expected
-// oldest-first (historical_orders.sql orders by created_at ASC).
+// recentHistoricalItems returns up to limit of the most-recent orders, ordered
+// oldest → latest, with DaysAgo computed relative to start. Input orders are
+// expected oldest-first (historical_orders.sql orders by created_at ASC), so we
+// select the last `limit` (the most recent) and keep them in chronological
+// order — the past-collection list relives the timeline forward.
 func recentHistoricalItems(orders []domain.HistoricalItem, start time.Time, limit int) []domain.HistoricalItem {
 	if len(orders) == 0 || limit <= 0 {
 		return nil
@@ -68,7 +70,7 @@ func recentHistoricalItems(orders []domain.HistoricalItem, start time.Time, limi
 	}
 	recent := orders[from:]
 	items := make([]domain.HistoricalItem, 0, len(recent))
-	for i := len(recent) - 1; i >= 0; i-- { // reverse: newest first
+	for i := 0; i < len(recent); i++ { // oldest → latest (input is ASC by created_at)
 		item := recent[i]
 		item.DaysAgo = int(start.Sub(item.OrderDate).Hours() / 24)
 		items = append(items, item)
@@ -146,12 +148,13 @@ func (r WinbackReader) Run(ctx context.Context, now time.Time) (int, error) {
 			return enqueued, err
 		}
 		// orders arrive oldest-first (SQL ORDER BY created_at ASC); take the last
-		// winbackPastLimit and reverse so the list shows the most-recent purchase
-		// first. HistoricalItem stays the single most-recent order for audit.
+		// winbackPastLimit (the most recent) and keep them oldest → latest so the
+		// list relives the timeline forward. HistoricalItem stays the single
+		// most-recent order for audit — now the LAST element of the list.
 		historicalItems := recentHistoricalItems(orders, start, winbackPastLimit)
 		var historicalItem domain.HistoricalItem
 		if len(historicalItems) > 0 {
-			historicalItem = historicalItems[0]
+			historicalItem = historicalItems[len(historicalItems)-1]
 		}
 
 		job := domain.WinbackJob{

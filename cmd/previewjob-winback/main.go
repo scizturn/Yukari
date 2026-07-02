@@ -74,7 +74,7 @@ func main() {
 	historicalItems := recentHistoricalItems(orders, start, winbackPastLimit)
 	var historicalItem domain.HistoricalItem
 	if len(historicalItems) > 0 {
-		historicalItem = historicalItems[0]
+		historicalItem = historicalItems[len(historicalItems)-1] // most recent = last (list is oldest → latest)
 	}
 
 	job := domain.WinbackJob{
@@ -103,7 +103,7 @@ func main() {
 
 // recentHistoricalItems mirrors reader.recentHistoricalItems: input orders are
 // oldest-first (historical_orders.sql orders by created_at ASC); take the last
-// limit and reverse so the list is newest-first.
+// limit (the most recent) and keep them oldest → latest.
 func recentHistoricalItems(orders []domain.HistoricalItem, start time.Time, limit int) []domain.HistoricalItem {
 	if len(orders) == 0 || limit <= 0 {
 		return nil
@@ -114,7 +114,7 @@ func recentHistoricalItems(orders []domain.HistoricalItem, start time.Time, limi
 	}
 	recent := orders[from:]
 	items := make([]domain.HistoricalItem, 0, len(recent))
-	for i := len(recent) - 1; i >= 0; i-- {
+	for i := 0; i < len(recent); i++ {
 		item := recent[i]
 		item.DaysAgo = int(start.Sub(item.OrderDate).Hours() / 24)
 		items = append(items, item)
