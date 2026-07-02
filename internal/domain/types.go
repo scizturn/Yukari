@@ -52,11 +52,12 @@ type BirthdayJob struct {
 }
 
 type HistoricalItem struct {
-	Name      string    `json:"name"`
-	ImageURL  string    `json:"image_url"`
-	URL       string    `json:"url,omitempty"`
-	OrderDate time.Time `json:"order_date"`
-	DaysAgo   int       `json:"days_ago"`
+	Name       string    `json:"name"`
+	SeriesName string    `json:"series_name,omitempty"`
+	ImageURL   string    `json:"image_url"`
+	URL        string    `json:"url,omitempty"`
+	OrderDate  time.Time `json:"order_date"`
+	DaysAgo    int       `json:"days_ago"`
 }
 
 type AnniversaryJob struct {

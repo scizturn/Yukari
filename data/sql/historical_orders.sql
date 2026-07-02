@@ -1,5 +1,14 @@
 SELECT
   COALESCE(i.name, 'Item Kyou') AS name,
+  -- series name via correlated subquery so a multi-row item_products join can't
+  -- duplicate the order row.
+  COALESCE((
+    SELECT s.name
+    FROM item_products ip
+    JOIN series s ON s.series_id = ip.series_id
+    WHERE ip.item_id = i.item_id
+    LIMIT 1
+  ), '') AS series_name,
   COALESCE(CONCAT('https://kyoucdn.id/', img.path, '.webp'), '') AS image_url,
   COALESCE(CONCAT('https://kyou.id/items/', i.item_id, '/'), '') AS url,
   o.created_at AS order_date
