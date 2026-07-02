@@ -30,5 +30,8 @@ WHERE i.status = 'ready'
   AND i.is_available = 1
   AND i.stock > 0
   AND COALESCE(i.isAdult, 0) = 0
+  -- skip "wakeari" (訳あり / imperfect-grade) items: no dedicated column, only the
+  -- name tag marks them, so match the bracketed "[Wakeari]" label.
+  AND i.name NOT LIKE '%Wakeari%'
 ORDER BY i.view_count DESC, i.updated_at DESC
 LIMIT 15;
