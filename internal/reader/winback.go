@@ -52,6 +52,30 @@ type WinbackStore interface {
 // the user's own wishlist first, then most-popular ready items to fill.
 const winbackReadyTarget = 12
 
+// winbackPastLimit caps how many past orders the "past collection" list shows.
+const winbackPastLimit = 3
+
+// recentHistoricalItems returns up to limit of the most-recent orders, newest
+// first, with DaysAgo computed relative to start. Input orders are expected
+// oldest-first (historical_orders.sql orders by created_at ASC).
+func recentHistoricalItems(orders []domain.HistoricalItem, start time.Time, limit int) []domain.HistoricalItem {
+	if len(orders) == 0 || limit <= 0 {
+		return nil
+	}
+	from := len(orders) - limit
+	if from < 0 {
+		from = 0
+	}
+	recent := orders[from:]
+	items := make([]domain.HistoricalItem, 0, len(recent))
+	for i := len(recent) - 1; i >= 0; i-- { // reverse: newest first
+		item := recent[i]
+		item.DaysAgo = int(start.Sub(item.OrderDate).Hours() / 24)
+		items = append(items, item)
+	}
+	return items
+}
+
 type WinbackQueue interface {
 	EnqueueWinbackTo(ctx context.Context, queueName string, job domain.WinbackJob) error
 }
@@ -121,23 +145,27 @@ func (r WinbackReader) Run(ctx context.Context, now time.Time) (int, error) {
 		if err != nil {
 			return enqueued, err
 		}
+		// orders arrive oldest-first (SQL ORDER BY created_at ASC); take the last
+		// winbackPastLimit and reverse so the list shows the most-recent purchase
+		// first. HistoricalItem stays the single most-recent order for audit.
+		historicalItems := recentHistoricalItems(orders, start, winbackPastLimit)
 		var historicalItem domain.HistoricalItem
-		if len(orders) > 0 {
-			historicalItem = orders[len(orders)-1]
-			historicalItem.DaysAgo = int(start.Sub(historicalItem.OrderDate).Hours() / 24)
+		if len(historicalItems) > 0 {
+			historicalItem = historicalItems[0]
 		}
 
 		job := domain.WinbackJob{
-			ID:             fmt.Sprintf("winback-%s-user-%s", now.Format("2006-01-02"), user.ID),
-			UserID:         user.ID,
-			Date:           now,
-			User:           user,
-			VoucherCode:    voucher.Code,
-			VoucherID:      voucher.ID,
-			WishlistItems:  wishlist,
-			HistoricalItem: historicalItem,
-			PopularItems:   popular,
-			Attempt:        1,
+			ID:              fmt.Sprintf("winback-%s-user-%s", now.Format("2006-01-02"), user.ID),
+			UserID:          user.ID,
+			Date:            now,
+			User:            user,
+			VoucherCode:     voucher.Code,
+			VoucherID:       voucher.ID,
+			WishlistItems:   wishlist,
+			HistoricalItem:  historicalItem,
+			HistoricalItems: historicalItems,
+			PopularItems:    popular,
+			Attempt:         1,
 		}
 		if err := r.insertQueued(ctx, job); err != nil {
 			return enqueued, err

@@ -54,6 +54,7 @@ type BirthdayJob struct {
 type HistoricalItem struct {
 	Name      string    `json:"name"`
 	ImageURL  string    `json:"image_url"`
+	URL       string    `json:"url,omitempty"`
 	OrderDate time.Time `json:"order_date"`
 	DaysAgo   int       `json:"days_ago"`
 }
@@ -114,9 +115,14 @@ type WinbackJob struct {
 	VoucherCode    string         `json:"voucher_code,omitempty"`
 	VoucherID      int64          `json:"voucher_id,omitempty"`
 	WishlistItems  []WishlistItem `json:"wishlist_items"`
+	// HistoricalItem is the single most-recent order, kept for audit metadata
+	// and backward compatibility with jobs enqueued before HistoricalItems.
 	HistoricalItem HistoricalItem `json:"historical_item"`
-	PopularItems   []FYPItem      `json:"popular_items"`
-	Attempt        int            `json:"attempt"`
+	// HistoricalItems is the user's most-recent orders (up to 3, newest first)
+	// rendered as the "past collection" list.
+	HistoricalItems []HistoricalItem `json:"historical_items,omitempty"`
+	PopularItems    []FYPItem        `json:"popular_items"`
+	Attempt         int              `json:"attempt"`
 }
 
 type DiscountedWishlistJob struct {

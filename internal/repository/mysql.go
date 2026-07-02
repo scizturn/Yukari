@@ -97,7 +97,7 @@ func (s *MySQLStore) HistoricalOrders(ctx context.Context, userID string) ([]dom
 	var items []domain.HistoricalItem
 	for rows.Next() {
 		var item domain.HistoricalItem
-		if err := rows.Scan(&item.Name, &item.ImageURL, &item.OrderDate); err != nil {
+		if err := rows.Scan(&item.Name, &item.ImageURL, &item.URL, &item.OrderDate); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
