@@ -62,11 +62,11 @@ func runWinback() {
 	if err != nil {
 		log.Fatalf("read historical orders: %v", err)
 	}
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	historicalItems := recentHistoricalItems(orders, start, 3) // winbackPastLimit = 3
 	var historicalItem domain.HistoricalItem
-	if len(orders) > 0 {
-		start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		historicalItem = orders[len(orders)-1]
-		historicalItem.DaysAgo = int(start.Sub(historicalItem.OrderDate).Hours() / 24)
+	if len(historicalItems) > 0 {
+		historicalItem = historicalItems[len(historicalItems)-1]
 	}
 
 	voucherCfg, err := repository.LoadBirthdayVoucherConfig(cfg.WinbackVoucherConfigPath)
@@ -99,9 +99,10 @@ func runWinback() {
 		User:           user,
 		VoucherCode:    voucher.Code,
 		VoucherID:      voucher.ID,
-		WishlistItems:  wishlist,
-		HistoricalItem: historicalItem,
-		PopularItems:   popular,
+		WishlistItems:   wishlist,
+		HistoricalItem:  historicalItem,
+		HistoricalItems: historicalItems,
+		PopularItems:    popular,
 		Attempt:        1,
 	}
 
@@ -137,4 +138,23 @@ func winbackWishlistItemIDs(wishlist []domain.WishlistItem) []string {
 		}
 	}
 	return ids
+}
+
+// recentHistoricalItems mirrors reader.recentHistoricalItems
+func recentHistoricalItems(orders []domain.HistoricalItem, start time.Time, limit int) []domain.HistoricalItem {
+	if len(orders) == 0 || limit <= 0 {
+		return nil
+	}
+	from := len(orders) - limit
+	if from < 0 {
+		from = 0
+	}
+	recent := orders[from:]
+	items := make([]domain.HistoricalItem, 0, len(recent))
+	for i := 0; i < len(recent); i++ {
+		item := recent[i]
+		item.DaysAgo = int(start.Sub(item.OrderDate).Hours() / 24)
+		items = append(items, item)
+	}
+	return items
 }
