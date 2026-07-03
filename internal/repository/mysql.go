@@ -382,8 +382,12 @@ func (s *MySQLStore) WinbackUsers(ctx context.Context, now time.Time) ([]domain.
 	for rows.Next() {
 		var user domain.User
 		var active bool
-		if err := rows.Scan(&user.ID, &user.Name, &user.Email, &active); err != nil {
+		var createdAt sql.NullTime
+		if err := rows.Scan(&user.ID, &user.Name, &user.Email, &createdAt, &active); err != nil {
 			return nil, err
+		}
+		if createdAt.Valid {
+			user.CreatedAt = createdAt.Time
 		}
 		user.IsActive = active
 		users = append(users, user)

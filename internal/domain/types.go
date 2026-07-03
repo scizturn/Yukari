@@ -7,7 +7,10 @@ type User struct {
 	Name     string    `json:"name"`
 	Email    string    `json:"email"`
 	Birthday time.Time `json:"birthday"`
-	IsActive bool      `json:"is_active"`
+	// CreatedAt is when the user's Kyou account was created. Winback templates
+	// render "sejak <year>" from it; zero value falls back to Kyou's founding year.
+	CreatedAt time.Time `json:"created_at"`
+	IsActive  bool      `json:"is_active"`
 }
 
 type WishlistItem struct {

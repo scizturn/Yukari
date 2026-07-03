@@ -14,11 +14,12 @@ type StubStore struct {
 func NewStubStore(now time.Time) *StubStore {
 	return &StubStore{
 		users: []domain.User{{
-			ID:       "1",
-			Name:     "Ruby",
-			Email:    "ruby@example.test",
-			Birthday: time.Date(1999, now.Month(), now.Day(), 0, 0, 0, 0, now.Location()),
-			IsActive: true,
+			ID:        "1",
+			Name:      "Ruby",
+			Email:     "ruby@example.test",
+			Birthday:  time.Date(1999, now.Month(), now.Day(), 0, 0, 0, 0, now.Location()),
+			CreatedAt: time.Date(2019, 8, 15, 0, 0, 0, 0, now.Location()),
+			IsActive:  true,
 		}},
 	}
 }

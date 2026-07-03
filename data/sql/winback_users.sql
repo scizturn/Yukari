@@ -2,6 +2,7 @@ SELECT DISTINCT
   CAST(u.user_id AS CHAR) AS user_id,
   u.name,
   u.email,
+  u.created_at,
   u.email_verified_at IS NOT NULL AS is_active
 FROM users u
 WHERE DATE(u.last_login) = DATE_SUB(DATE(?), INTERVAL 90 DAY)
