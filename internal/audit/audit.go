@@ -17,6 +17,7 @@ const (
 	FeatureDiscountedWishlist = "discounted_wishlist"
 	FeatureWinback            = "winback"
 	FeatureWishlistBackIn     = "wishlist_back_in"
+	FeaturePoReady            = "po_ready"
 	ProviderKirimEmail        = "kirim.email"
 )
 

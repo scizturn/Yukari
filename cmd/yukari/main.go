@@ -9,7 +9,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: yukari <campaign>")
-		fmt.Fprintln(os.Stderr, "campaigns: birthday, anniversary, leftover-cart, discounted-wishlist, wishlist-back-in, winback")
+		fmt.Fprintln(os.Stderr, "campaigns: birthday, anniversary, leftover-cart, discounted-wishlist, wishlist-back-in, winback, po-ready")
 		os.Exit(1)
 	}
 	switch os.Args[1] {
@@ -25,7 +25,9 @@ func main() {
 		runWinback()
 	case "wishlist-back-in":
 		runWishlistBackIn()
+	case "po-ready":
+		runPoReady()
 	default:
-		log.Fatalf("unknown campaign: %q  (valid: birthday, anniversary, leftover-cart, discounted-wishlist, wishlist-back-in, winback)", os.Args[1])
+		log.Fatalf("unknown campaign: %q  (valid: birthday, anniversary, leftover-cart, discounted-wishlist, wishlist-back-in, winback, po-ready)", os.Args[1])
 	}
 }

@@ -135,6 +135,40 @@ type DiscountedWishlistJob struct {
 	Attempt int                      `json:"attempt"`
 }
 
+type PoReadyItem struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	URL      string `json:"url"`
+	ImageURL string `json:"image_url"`
+	Price    int    `json:"price"`
+	Quantity int    `json:"quantity"`
+}
+
+// PoReadyJob is a per-order pelunasan reminder: a PO the user paid a DP on has
+// arrived (item.status='ready') while the order still owes a balance.
+type PoReadyJob struct {
+	ID          string        `json:"job_id"`
+	OrderID     string        `json:"order_id"`
+	UserID      string        `json:"user_id"`
+	Date        time.Time     `json:"date"`
+	User        User          `json:"user"`
+	Items       []PoReadyItem `json:"items"`
+	Remaining   int           `json:"remaining"`
+	DownPayment int           `json:"down_payment"`
+	ETA         string        `json:"eta"`
+	Attempt     int           `json:"attempt"`
+}
+
+// PoReadyOrder is the per-order header Yukari reads before pulling the order's
+// ready items. It is not part of the wire contract (Makoto never sees it).
+type PoReadyOrder struct {
+	User        User
+	OrderID     string
+	Remaining   int
+	DownPayment int
+	ETA         string
+}
+
 type WishlistBackInItem struct {
 	ID           string    `json:"id"`
 	Name         string    `json:"name"`

@@ -28,7 +28,7 @@ func OpenMySQLStore(dsn string, loader sqlfiles.Loader) (*MySQLStore, error) {
 }
 
 func NewMySQLStore(db *sql.DB, loader sqlfiles.Loader) (*MySQLStore, error) {
-	names := []string{"birthday_users", "wishlist_items", "wishlist_items_winback", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill", "winback_users", "winback_fill_items", "wishlist_back_in_items", "wishlist_back_in_users", "wishlist_back_in_companion", "wishlist_back_in_preview_item"}
+	names := []string{"birthday_users", "wishlist_items", "wishlist_items_winback", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill", "winback_users", "winback_fill_items", "wishlist_back_in_items", "wishlist_back_in_users", "wishlist_back_in_companion", "wishlist_back_in_preview_item", "po_ready_orders", "po_ready_items"}
 	queries := make(map[string]string, len(names))
 	for _, name := range names {
 		query, err := loader.Read(name)
@@ -269,6 +269,46 @@ func (s *MySQLStore) discountedWishlistRows(ctx context.Context, query string, i
 		item.DiscountName = discountName.String
 		item.DiscountEnd = timePtr(discountEnd)
 		item.IsWishlisted = isWishlisted
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *MySQLStore) PoReadyOrders(ctx context.Context) ([]domain.PoReadyOrder, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["po_ready_orders"])
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var orders []domain.PoReadyOrder
+	for rows.Next() {
+		var order domain.PoReadyOrder
+		var active bool
+		if err := rows.Scan(&order.OrderID, &order.User.ID, &order.User.Name, &order.User.Email, &active, &order.Remaining, &order.DownPayment, &order.ETA); err != nil {
+			return nil, err
+		}
+		order.User.IsActive = active
+		orders = append(orders, order)
+	}
+	return orders, rows.Err()
+}
+
+func (s *MySQLStore) PoReadyItems(ctx context.Context, orderID string) ([]domain.PoReadyItem, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["po_ready_items"], orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []domain.PoReadyItem
+	for rows.Next() {
+		var item domain.PoReadyItem
+		var quantity sql.NullInt64
+		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.ImageURL, &item.Price, &quantity); err != nil {
+			return nil, err
+		}
+		item.Quantity = int(quantity.Int64)
 		items = append(items, item)
 	}
 	return items, rows.Err()
