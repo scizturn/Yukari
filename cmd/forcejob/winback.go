@@ -117,7 +117,7 @@ func runWinback() {
 		log.Fatalf("enqueue force job: %v", err)
 	}
 
-	log.Printf("forced winback job enqueued: queue=%s job_id=%s user_id=%s voucher_id=%d voucher_code=%s name=%q email=%s wishlist=%d historical=%s",
+	log.Printf("forced winback job enqueued: queue=%s job_id=%s user_id=%s voucher_id=%d voucher_code=%s name=%q email=%s wishlist=%d historical=%d",
 		cfg.WinbackQueueName,
 		job.ID,
 		user.ID,
@@ -126,7 +126,7 @@ func runWinback() {
 		user.Name,
 		maskEmail(user.Email),
 		len(wishlist),
-		historicalItem.Name,
+		len(historicalItems),
 	)
 }
 
