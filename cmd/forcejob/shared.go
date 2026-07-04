@@ -79,16 +79,20 @@ func findUserByID(ctx context.Context, dsn string, userID string) (domain.User, 
 
 	var user domain.User
 	var birthday sql.NullTime
+	var createdAt sql.NullTime
 	err = db.QueryRowContext(ctx, `
-SELECT user_id, name, email, birthdate, email_verified_at IS NOT NULL
+SELECT user_id, name, email, birthdate, created_at, email_verified_at IS NOT NULL
 FROM users
 WHERE CAST(user_id AS CHAR) = ?
-LIMIT 1`, userID).Scan(&user.ID, &user.Name, &user.Email, &birthday, &user.IsActive)
+LIMIT 1`, userID).Scan(&user.ID, &user.Name, &user.Email, &birthday, &createdAt, &user.IsActive)
 	if err != nil {
 		return domain.User{}, fmt.Errorf("user %s not found: %w", userID, err)
 	}
 	if birthday.Valid {
 		user.Birthday = birthday.Time
+	}
+	if createdAt.Valid {
+		user.CreatedAt = createdAt.Time
 	}
 	return user, nil
 }
