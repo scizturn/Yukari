@@ -17,9 +17,14 @@ const wishlistBackInMaxItems = 5
 // window [this Friday - 7d, this Friday 00:00) = last Friday 00:00 .. Thursday 23:59.
 const wishlistBackInWindow = 7 * 24 * time.Hour
 
+// wishlistBackInRecoCount is the exact number of cross-sell recommendations the
+// "Gas, nemenin yang udah kamu beli" section needs; fewer -> the section is hidden.
+const wishlistBackInRecoCount = 6
+
 type WishlistBackInStore interface {
 	WishlistBackInUserItems(ctx context.Context, startAt, endAt time.Time) ([]domain.WishlistBackInUserItem, error)
 	WishlistBackInCompanion(ctx context.Context, userID, itemID string) (domain.WishlistBackInItem, error)
+	WishlistBackInRecommendations(ctx context.Context, userID, anchorItemID string) ([]domain.WishlistBackInItem, error)
 }
 
 type WishlistBackInQueue interface {
@@ -79,9 +84,23 @@ func (r WishlistBackInReader) Run(ctx context.Context, now time.Time) (int, erro
 			continue
 		}
 
+		// Anchor = an item the user already bought in the hero item's
+		// series/category. It names the "Gas, nemenin..." section and seeds the
+		// recommendations. Recommendations = 6 most-popular items in that
+		// series/category; the section only renders with a full 6.
 		companion, err := r.store.WishlistBackInCompanion(ctx, user.ID, items[0].ID)
 		if err != nil {
 			return enqueued, err
+		}
+		var recos []domain.WishlistBackInItem
+		if companion.ID != "" {
+			recos, err = r.store.WishlistBackInRecommendations(ctx, user.ID, companion.ID)
+			if err != nil {
+				return enqueued, err
+			}
+			if len(recos) < wishlistBackInRecoCount {
+				companion, recos = domain.WishlistBackInItem{}, nil
+			}
 		}
 
 		itemIDs := make([]string, len(items))
@@ -106,6 +125,7 @@ func (r WishlistBackInReader) Run(ctx context.Context, now time.Time) (int, erro
 			VoucherID:     voucher.ID,
 			Items:         items,
 			CompanionItem: companion,
+			RecoItems:     recos,
 			Attempt:       1,
 		}
 		if err := r.insertQueued(ctx, job, itemIDs); err != nil {

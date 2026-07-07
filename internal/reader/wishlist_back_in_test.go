@@ -31,6 +31,7 @@ func TestWishlistBackInBuildsOneJobPerUserWithTheirItems(t *testing.T) {
 			{User: userB, Item: domain.WishlistBackInItem{ID: "103", Name: "Solo", RestockedAt: now.Add(-2 * time.Hour)}},
 		},
 		companion: domain.WishlistBackInItem{ID: "202", Name: "Purchased Pair"},
+		recos:     sixRecos(),
 	}
 	queue := &fakeWishlistBackInQueue{}
 	vouchers := &fakeWishlistBackInVoucherCreator{}
@@ -48,6 +49,9 @@ func TestWishlistBackInBuildsOneJobPerUserWithTheirItems(t *testing.T) {
 	}
 	if first.CompanionItem.ID != "202" {
 		t.Fatalf("expected companion on hero item, got %#v", first.CompanionItem)
+	}
+	if len(first.RecoItems) != 6 {
+		t.Fatalf("expected 6 reco items when a full set is available, got %d", len(first.RecoItems))
 	}
 	if first.VoucherCode == "" {
 		t.Fatal("expected voucher in job")
@@ -79,9 +83,29 @@ func TestWishlistBackInCapsItemsAtFive(t *testing.T) {
 	}
 }
 
+func TestWishlistBackInHidesRecoSectionWhenFewerThanSix(t *testing.T) {
+	now := time.Date(2026, 6, 19, 9, 0, 0, 0, time.UTC)
+	user := domain.User{ID: "5", Name: "Solo", Email: "s@example.test", IsActive: true}
+	store := &fakeWishlistBackInStore{
+		rows:      []domain.WishlistBackInUserItem{{User: user, Item: domain.WishlistBackInItem{ID: "101"}}},
+		companion: domain.WishlistBackInItem{ID: "202", Name: "Purchased Pair"},
+		recos:     sixRecos()[:5], // only 5 available -> section must be hidden
+	}
+	queue := &fakeWishlistBackInQueue{}
+
+	if _, err := NewWishlistBackIn(store, queue, nil, nil, "q", "").Run(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+	job := queue.jobs[0]
+	if job.CompanionItem.ID != "" || len(job.RecoItems) != 0 {
+		t.Fatalf("expected reco section hidden with <6 recos, got companion=%q recos=%d", job.CompanionItem.ID, len(job.RecoItems))
+	}
+}
+
 type fakeWishlistBackInStore struct {
 	rows             []domain.WishlistBackInUserItem
 	companion        domain.WishlistBackInItem
+	recos            []domain.WishlistBackInItem
 	userItemsCalled  bool
 	companionItemIDs []string
 }
@@ -94,6 +118,18 @@ func (s *fakeWishlistBackInStore) WishlistBackInUserItems(context.Context, time.
 func (s *fakeWishlistBackInStore) WishlistBackInCompanion(_ context.Context, _, itemID string) (domain.WishlistBackInItem, error) {
 	s.companionItemIDs = append(s.companionItemIDs, itemID)
 	return s.companion, nil
+}
+
+func (s *fakeWishlistBackInStore) WishlistBackInRecommendations(context.Context, string, string) ([]domain.WishlistBackInItem, error) {
+	return s.recos, nil
+}
+
+func sixRecos() []domain.WishlistBackInItem {
+	var out []domain.WishlistBackInItem
+	for i := 0; i < 6; i++ {
+		out = append(out, domain.WishlistBackInItem{ID: "reco" + string(rune('1'+i))})
+	}
+	return out
 }
 
 type fakeWishlistBackInQueue struct{ jobs []domain.WishlistBackInJob }

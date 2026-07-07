@@ -65,10 +65,20 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	var recos []domain.WishlistBackInItem
+	if companion.ID != "" {
+		recos, err = store.WishlistBackInRecommendations(ctx, user.ID, companion.ID)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if len(recos) < 6 { // need a full 6; else hide the section
+			companion, recos = domain.WishlistBackInItem{}, nil
+		}
+	}
 	job := domain.WishlistBackInJob{
 		ID:     "preview-wishlist-back-in-" + cutoff.Format("2006-01-02") + "-user-" + user.ID,
 		UserID: user.ID, Date: now, User: user, VoucherCode: "WBI-PREVIEW-14D",
-		Items: items, CompanionItem: companion, Attempt: 1,
+		Items: items, CompanionItem: companion, RecoItems: recos, Attempt: 1,
 	}
 	payload, err := json.MarshalIndent(job, "", "  ")
 	if err != nil {
