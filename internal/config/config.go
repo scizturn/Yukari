@@ -29,7 +29,6 @@ type Config struct {
 	WishlistBackInQueueName         string
 	PoReadyQueueName                string
 	WishlistBackInVoucherConfigPath string
-	WishlistBackInStartAt           string
 }
 
 func Load() Config {
@@ -54,7 +53,6 @@ func Load() Config {
 		WishlistBackInQueueName:         env("YUKARI_WISHLIST_BACK_IN_QUEUE_NAME", "wishlist_back_in_email_jobs"),
 		PoReadyQueueName:                env("YUKARI_PO_READY_QUEUE_NAME", "po_ready_email_jobs"),
 		WishlistBackInVoucherConfigPath: env("YUKARI_WISHLIST_BACK_IN_VOUCHER_CONFIG", "data/vouchers/wishlist_back_in.json"),
-		WishlistBackInStartAt:           env("YUKARI_WISHLIST_BACK_IN_START_AT", "2026-06-12"),
 	}
 }
 

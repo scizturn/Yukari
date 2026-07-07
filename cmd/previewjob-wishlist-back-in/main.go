@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"log"
 	"os"
 	"strings"
@@ -15,6 +13,8 @@ import (
 	"github.com/kyou-id/yukari/internal/repository"
 	"github.com/kyou-id/yukari/internal/sqlfiles"
 )
+
+const maxItems = 5
 
 func main() {
 	ctx := context.Background()
@@ -29,59 +29,46 @@ func main() {
 		days := (int(now.Weekday()) - int(time.Friday) + 7) % 7
 		cutoff = cutoff.AddDate(0, 0, -days)
 	}
-	startAt, err := time.ParseInLocation("2006-01-02", cfg.WishlistBackInStartAt, location)
-	if err != nil {
-		log.Fatal(err)
-	}
+	startAt := cutoff.AddDate(0, 0, -7)
+
 	store, err := repository.OpenMySQLStore(cfg.DatabaseDSN, sqlfiles.NewLoader(cfg.SQLDir))
 	if err != nil {
 		log.Fatal(err)
 	}
-	var item domain.WishlistBackInItem
+	rows, err := store.WishlistBackInUserItems(ctx, startAt, cutoff)
+	if err != nil || len(rows) == 0 {
+		log.Fatalf("read wishlist back in user items: count=%d err=%v", len(rows), err)
+	}
+
 	forced := strings.TrimSpace(os.Getenv("YUKARI_FORCE_USER"))
-	if forced != "" {
-		item, err = store.WishlistBackInPreviewItem(ctx, forced, startAt, cutoff)
-		if errors.Is(err, sql.ErrNoRows) {
-			previewStart := cutoff.AddDate(-1, 0, 0)
-			log.Printf("no current-window item for forced user %s; searching historical restocks since %s for preview only", forced, previewStart.Format("2006-01-02"))
-			item, err = store.WishlistBackInPreviewItem(ctx, forced, previewStart, cutoff)
-		}
-		if err != nil {
-			log.Fatalf("no eligible wishlist back in item for forced user %s: %v", forced, err)
-		}
-	} else {
-		items, readErr := store.WishlistBackInItems(ctx, startAt, cutoff)
-		if readErr != nil || len(items) == 0 {
-			log.Fatalf("read wishlist back in items: count=%d err=%v", len(items), readErr)
-		}
-		item = items[0]
-	}
-	users, err := store.WishlistBackInUsers(ctx, item.ID)
-	if err != nil || len(users) == 0 {
-		log.Fatalf("read wishlist users: count=%d err=%v", len(users), err)
-	}
-	user := users[0]
+	user := rows[0].User
 	if forced != "" {
 		found := false
-		for _, candidate := range users {
-			if candidate.ID == forced {
-				user = candidate
-				found = true
+		for _, row := range rows {
+			if row.User.ID == forced {
+				user, found = row.User, true
 				break
 			}
 		}
 		if !found {
-			log.Fatalf("forced user %s did not wishlist item %s", forced, item.ID)
+			log.Fatalf("forced user %s has no wishlist back in item in window", forced)
 		}
 	}
-	companion, err := store.WishlistBackInCompanion(ctx, user.ID, item.ID)
+
+	var items []domain.WishlistBackInItem
+	for _, row := range rows {
+		if row.User.ID == user.ID && len(items) < maxItems {
+			items = append(items, row.Item)
+		}
+	}
+	companion, err := store.WishlistBackInCompanion(ctx, user.ID, items[0].ID)
 	if err != nil {
 		log.Fatal(err)
 	}
 	job := domain.WishlistBackInJob{
 		ID:     "preview-wishlist-back-in-" + cutoff.Format("2006-01-02") + "-user-" + user.ID,
 		UserID: user.ID, Date: now, User: user, VoucherCode: "WBI-PREVIEW-14D",
-		Item: item, CompanionItem: companion, Attempt: 1,
+		Items: items, CompanionItem: companion, Attempt: 1,
 	}
 	payload, err := json.MarshalIndent(job, "", "  ")
 	if err != nil {
@@ -91,7 +78,7 @@ func main() {
 	if err := os.WriteFile(path, payload, 0o600); err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("preview job written: path=%s user_id=%s item_id=%s", path, user.ID, item.ID)
+	log.Printf("preview job written: path=%s user_id=%s items=%d", path, user.ID, len(items))
 }
 
 func env(key, fallback string) string {

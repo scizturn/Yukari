@@ -182,18 +182,28 @@ type WishlistBackInItem struct {
 	Manufacturer string    `json:"manufacturer"`
 	SeriesName   string    `json:"series_name"`
 	CategoryName string    `json:"category_name"`
-	PopularScore int       `json:"popular_score"`
 	RestockedAt  time.Time `json:"restocked_at"`
 }
 
+// WishlistBackInJob is user-centric: one email per user listing up to 5 of the
+// user's own wishlisted items that came back in stock this window (newest restock
+// first). CompanionItem cross-sells against the hero (first) item.
 type WishlistBackInJob struct {
-	ID            string             `json:"job_id"`
-	UserID        string             `json:"user_id"`
-	Date          time.Time          `json:"date"`
-	User          User               `json:"user"`
-	VoucherCode   string             `json:"voucher_code,omitempty"`
-	VoucherID     int64              `json:"voucher_id,omitempty"`
-	Item          WishlistBackInItem `json:"item"`
-	CompanionItem WishlistBackInItem `json:"companion_item"`
-	Attempt       int                `json:"attempt"`
+	ID            string               `json:"job_id"`
+	UserID        string               `json:"user_id"`
+	Date          time.Time            `json:"date"`
+	User          User                 `json:"user"`
+	VoucherCode   string               `json:"voucher_code,omitempty"`
+	VoucherID     int64                `json:"voucher_id,omitempty"`
+	Items         []WishlistBackInItem `json:"items"`
+	CompanionItem WishlistBackInItem   `json:"companion_item"`
+	Attempt       int                  `json:"attempt"`
+}
+
+// WishlistBackInUserItem is one (user, restocked wishlist item) row from the
+// reader query. It is not part of the wire contract (Makoto never sees it);
+// the reader groups these by user into a WishlistBackInJob.
+type WishlistBackInUserItem struct {
+	User User
+	Item WishlistBackInItem
 }

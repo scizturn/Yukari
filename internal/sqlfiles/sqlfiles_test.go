@@ -173,7 +173,7 @@ func compactSQL(query string) string {
 }
 
 func TestWishlistBackInQueriesEnforceCampaignRules(t *testing.T) {
-	query, err := NewLoader("../../data/sql").Read("wishlist_back_in_items")
+	query, err := NewLoader("../../data/sql").Read("wishlist_back_in_user_items")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,11 +183,13 @@ func TestWishlistBackInQueriesEnforceCampaignRules(t *testing.T) {
 		"sl.description = 'Increased via Insert Stock (Adjusment)'",
 		"'$.before_all_stock'",
 		"'$.after_all_stock'",
-		"i.status = 'ready'",
+		"i.status IN ('ready', 'PO')",
+		"ip.po_deadline IS NULL OR ip.po_deadline >= CURRENT_DATE",
 		"i.stock > 0",
-		"COUNT(DISTINCT w.user_id)",
+		"u.email_verified_at IS NOT NULL",
 		"edl.feature = 'wishlist_back_in'",
-		"LIMIT 5",
+		"JSON_CONTAINS",
+		"INTERVAL 90 DAY",
 	} {
 		if !strings.Contains(query, want) {
 			t.Fatalf("expected wishlist back in query to contain %q", want)

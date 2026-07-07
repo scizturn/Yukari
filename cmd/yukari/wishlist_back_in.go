@@ -18,10 +18,6 @@ func runWishlistBackIn() {
 		log.Fatalf("load timezone: %v", err)
 	}
 	now := time.Now().In(location)
-	startAt, err := time.ParseInLocation("2006-01-02", cfg.WishlistBackInStartAt, location)
-	if err != nil {
-		log.Fatalf("parse YUKARI_WISHLIST_BACK_IN_START_AT: %v", err)
-	}
 
 	store, err := buildStore(cfg, now)
 	if err != nil {
@@ -49,7 +45,7 @@ func runWishlistBackIn() {
 		defer auditLogger.Close()
 	}
 
-	count, err := reader.NewWishlistBackIn(wbiStore, redisQueue, vouchers, auditLogger, cfg.WishlistBackInQueueName, cfg.ActionURL, startAt).Run(ctx, now)
+	count, err := reader.NewWishlistBackIn(wbiStore, redisQueue, vouchers, auditLogger, cfg.WishlistBackInQueueName, cfg.ActionURL).Run(ctx, now)
 	if err != nil {
 		log.Fatalf("wishlist back in reader failed: %v", err)
 	}

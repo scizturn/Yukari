@@ -8,7 +8,6 @@ SELECT
   COALESCE(m.name, '')                                            AS manufacturer,
   COALESCE(s.name, '')                                            AS series_name,
   COALESCE(c.name, '')                                            AS category_name,
-  i.view_count                                                    AS popular_score,
   COALESCE(i.restocked_at, i.updated_at, i.created_at, CURRENT_TIMESTAMP) AS restocked_at
 FROM orders o
 JOIN order_items oi ON oi.order_id = o.order_id

@@ -90,6 +90,11 @@ YUKARI_ANNIVERSARY_VOUCHER_CONFIG=data/vouchers/anniversary.json
 
 # Discounted wishlist
 YUKARI_DISCOUNTED_WISHLIST_QUEUE_NAME=discounted_wishlist_email_jobs
+
+# Wishlist back-in (reader hanya jalan hari Jumat; window rolling 7 hari dihitung
+# otomatis dari tanggal run — tidak ada START_AT)
+YUKARI_WISHLIST_BACK_IN_QUEUE_NAME=wishlist_back_in_email_jobs
+YUKARI_WISHLIST_BACK_IN_VOUCHER_CONFIG=data/vouchers/wishlist_back_in.json
 ```
 
 ## Discounted Wishlist Conditions
@@ -131,6 +136,40 @@ Code blocker discounted wishlist sudah ditangani:
 
 Release mass-send tetap menunggu checklist operasional Makoto: preference center nyata, seed send, inbox rendering, dan konfigurasi provider unsubscribe/suppression.
 
+# Wishlist back-in
+
+Kampanye **user-centric**: satu email per user berisi item wishlist **milik user itu sendiri** yang baru **balik stok** minggu ini. Beda dari discounted-wishlist yang mulai dari diskon, ini mulai dari **event restock** di `stock_logs`.
+
+**Kapan jalan.** Reader self-gating: `go run ./cmd/yukari wishlist-back-in` hanya bekerja hari **Jumat** (hari lain langsung return 0). Window scan restock **rolling 7 hari** dihitung otomatis: `[Jumat lalu 00:00, Jumat ini 00:00)` di `YUKARI_TIMEZONE` (= Jumat lalu s/d Kamis 23:59). Tidak ada `START_AT`.
+
+**"Balik stok" = event `stock_logs`** dengan `is_restock=1`, `type='increase'`, `description='Increased via Insert Stock (Adjusment)'`, dan JSON `before_all_stock=0 → after_all_stock>0`. Berlaku untuk item **`ready`** maupun **`PO`** yang slotnya reopen; PO di-guard `po_deadline IS NULL OR po_deadline >= CURRENT_DATE` supaya PO yang sudah tutup tidak ikut.
+
+## Wishlist Back-In Conditions
+
+User + item dipilih hanya jika:
+
+- user punya **verified email**;
+- item ada di **wishlist user**, dan punya event restock 0→>0 (di atas) **dalam window 7 hari**;
+- item sekarang `stock>0`, `is_available=1`, status `ready`/`PO` (PO deadline masih buka), non-adult;
+- user **belum** dikirimi item tersebut dalam **90 hari terakhir** (dedup per `(user, item)` via `email_delivery_logs.metadata.item_ids`, cooldown 90 hari — restock lagi setelah >90 hari boleh re-notify).
+
+Tiap user diberi **maksimum 5 item** per email, diurut **restock terbaru** dulu. Item pertama (hero) dipakai untuk mencari **companion** (`wishlist_back_in_companion.sql`): satu item yang **sudah dibeli** user di series/kategori yang sama; jika tidak ada, companion kosong dan bagian "Gas, nemenin…" hilang (fallback N/A).
+
+**PERF.** Query (`wishlist_back_in_user_items.sql`) memakai `STRAIGHT_JOIN` dengan `stock_logs` sebagai driving table supaya window kecil memangkas lebih dulu — tanpa ini planner full-scan `items` (~215k row, 70s+). ~1–3s untuk window 7 hari, tanpa disk temp table.
+
+### Development checklist
+
+```sh
+# 1. Unit test
+go test ./...
+
+# 2. Lihat payload dari data production-like tanpa enqueue
+go run ./cmd/previewjob-wishlist-back-in
+
+# 3. Jalankan batch (hanya efektif hari Jumat; hari lain no-op)
+go run ./cmd/yukari wishlist-back-in
+```
+
 ## Voucher
 
 Yukari membuat voucher alias per-user sebelum enqueue. Kode voucher bersifat deterministik (HMAC dari `user_id + tahun + secret`), sehingga retry dalam tahun yang sama menghasilkan kode yang sama.
@@ -165,6 +204,16 @@ yang **mulai di hari run** (`discount_start_date = DATE(now)`), jadi jalanin
 SORE/MALAM setelah diskon go-live — bukan tengah malam. Penting: jam 20:00 WIB =
 13:00 UTC, tanggal UTC & WIB masih sama; kalau ditaruh tengah malam (00:00 WIB =
 17:00 UTC hari sebelumnya) tanggalnya geser dan nggak nangkep diskon yang bener.
+
+Wishlist back-in **hanya jalan hari Jumat** (reader self-gating). Set cron di hari Jumat:
+
+```text
+Command: yukari wishlist-back-in
+Frequency: 0 13 * * 5     # Jumat 13:00 UTC = Jumat 20:00 WIB
+Timeout: 300
+```
+
+⚠️ **Jebakan UTC↔WIB.** Reader ngecek "hari Jumat" pakai `YUKARI_TIMEZONE` (Asia/Jakarta), sedangkan cron Coolify jalan di UTC. Pastikan waktunya tetap **Jumat di WIB** — mis. `0 13 * * 5` (Jumat 20:00 WIB) aman, tapi `0 20 * * 5` = Sabtu 03:00 WIB → reader lihat Sabtu → **no-op, kampanye minggu itu ke-skip** (bukan cuma telat: window-nya geser). Alternatif aman: cron harian `0 13 * * *` — reader no-op 6 hari, cuma Jumat yang kerja.
 
 Contoh task lama untuk birthday dan anniversary:
 

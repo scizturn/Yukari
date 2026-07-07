@@ -10,61 +10,89 @@ import (
 
 func TestWishlistBackInRunsOnlyOnFriday(t *testing.T) {
 	store := &fakeWishlistBackInStore{}
-	count, err := NewWishlistBackIn(store, &fakeWishlistBackInQueue{}, nil, nil, "queue", "", time.Time{}).Run(context.Background(), time.Date(2026, 6, 18, 9, 0, 0, 0, time.UTC))
+	count, err := NewWishlistBackIn(store, &fakeWishlistBackInQueue{}, nil, nil, "queue", "").Run(context.Background(), time.Date(2026, 6, 18, 9, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if count != 0 || store.itemsCalled {
-		t.Fatalf("expected no work outside Friday, count=%d called=%t", count, store.itemsCalled)
+	if count != 0 || store.userItemsCalled {
+		t.Fatalf("expected no work outside Friday, count=%d called=%t", count, store.userItemsCalled)
 	}
 }
 
-func TestWishlistBackInBuildsOneJobPerWishlistUser(t *testing.T) {
+func TestWishlistBackInBuildsOneJobPerUserWithTheirItems(t *testing.T) {
 	now := time.Date(2026, 6, 19, 9, 0, 0, 0, time.UTC)
-	item := domain.WishlistBackInItem{ID: "101", Name: "Restocked Figure", PopularScore: 8, RestockedAt: now.Add(-time.Hour)}
+	userA := domain.User{ID: "1", Name: "A", Email: "a@example.test", IsActive: true}
+	userB := domain.User{ID: "2", Name: "B", Email: "b@example.test", IsActive: true}
 	store := &fakeWishlistBackInStore{
-		items: []domain.WishlistBackInItem{item},
-		users: []domain.User{
-			{ID: "1", Name: "A", Email: "a@example.test", IsActive: true},
-			{ID: "2", Name: "B", Email: "b@example.test", IsActive: true},
+		// Rows arrive grouped by user, newest restock first (as the SQL orders).
+		rows: []domain.WishlistBackInUserItem{
+			{User: userA, Item: domain.WishlistBackInItem{ID: "101", Name: "Newest", RestockedAt: now.Add(-time.Hour)}},
+			{User: userA, Item: domain.WishlistBackInItem{ID: "102", Name: "Older", RestockedAt: now.Add(-48 * time.Hour)}},
+			{User: userB, Item: domain.WishlistBackInItem{ID: "103", Name: "Solo", RestockedAt: now.Add(-2 * time.Hour)}},
 		},
 		companion: domain.WishlistBackInItem{ID: "202", Name: "Purchased Pair"},
 	}
 	queue := &fakeWishlistBackInQueue{}
 	vouchers := &fakeWishlistBackInVoucherCreator{}
 
-	count, err := NewWishlistBackIn(store, queue, vouchers, nil, "wishlist_back_in_email_jobs", "https://kyou.id/user/my-voucher", now.AddDate(0, 0, -7)).Run(context.Background(), now)
+	count, err := NewWishlistBackIn(store, queue, vouchers, nil, "wishlist_back_in_email_jobs", "https://kyou.id/user/my-voucher").Run(context.Background(), now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if count != 2 || len(queue.jobs) != 2 {
 		t.Fatalf("expected two jobs, count=%d jobs=%d", count, len(queue.jobs))
 	}
-	if queue.jobs[0].Item.ID != "101" || queue.jobs[0].CompanionItem.ID != "202" {
-		t.Fatalf("unexpected personalization: %#v", queue.jobs[0])
+	first := queue.jobs[0]
+	if first.UserID != "1" || len(first.Items) != 2 || first.Items[0].ID != "101" || first.Items[1].ID != "102" {
+		t.Fatalf("unexpected first job items: %#v", first)
 	}
-	if queue.jobs[0].VoucherCode == "" {
+	if first.CompanionItem.ID != "202" {
+		t.Fatalf("expected companion on hero item, got %#v", first.CompanionItem)
+	}
+	if first.VoucherCode == "" {
 		t.Fatal("expected voucher in job")
+	}
+	if len(store.companionItemIDs) != 2 || store.companionItemIDs[0] != "101" || store.companionItemIDs[1] != "103" {
+		t.Fatalf("companion should key off each user's hero (newest) item, got %v", store.companionItemIDs)
+	}
+	if second := queue.jobs[1]; second.UserID != "2" || len(second.Items) != 1 {
+		t.Fatalf("unexpected second job: %#v", second)
+	}
+}
+
+func TestWishlistBackInCapsItemsAtFive(t *testing.T) {
+	now := time.Date(2026, 6, 19, 9, 0, 0, 0, time.UTC)
+	user := domain.User{ID: "9", Name: "Packrat", Email: "p@example.test", IsActive: true}
+	var rows []domain.WishlistBackInUserItem
+	for i := 0; i < 8; i++ {
+		rows = append(rows, domain.WishlistBackInUserItem{User: user, Item: domain.WishlistBackInItem{ID: string(rune('a' + i))}})
+	}
+	store := &fakeWishlistBackInStore{rows: rows}
+	queue := &fakeWishlistBackInQueue{}
+
+	count, err := NewWishlistBackIn(store, queue, nil, nil, "q", "").Run(context.Background(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || len(queue.jobs[0].Items) != wishlistBackInMaxItems {
+		t.Fatalf("expected one job capped at %d items, got count=%d items=%d", wishlistBackInMaxItems, count, len(queue.jobs[0].Items))
 	}
 }
 
 type fakeWishlistBackInStore struct {
-	items       []domain.WishlistBackInItem
-	users       []domain.User
-	companion   domain.WishlistBackInItem
-	itemsCalled bool
+	rows             []domain.WishlistBackInUserItem
+	companion        domain.WishlistBackInItem
+	userItemsCalled  bool
+	companionItemIDs []string
 }
 
-func (s *fakeWishlistBackInStore) WishlistBackInItems(context.Context, time.Time, time.Time) ([]domain.WishlistBackInItem, error) {
-	s.itemsCalled = true
-	return s.items, nil
+func (s *fakeWishlistBackInStore) WishlistBackInUserItems(context.Context, time.Time, time.Time) ([]domain.WishlistBackInUserItem, error) {
+	s.userItemsCalled = true
+	return s.rows, nil
 }
 
-func (s *fakeWishlistBackInStore) WishlistBackInUsers(context.Context, string) ([]domain.User, error) {
-	return s.users, nil
-}
-
-func (s *fakeWishlistBackInStore) WishlistBackInCompanion(context.Context, string, string) (domain.WishlistBackInItem, error) {
+func (s *fakeWishlistBackInStore) WishlistBackInCompanion(_ context.Context, _, itemID string) (domain.WishlistBackInItem, error) {
+	s.companionItemIDs = append(s.companionItemIDs, itemID)
 	return s.companion, nil
 }
 
