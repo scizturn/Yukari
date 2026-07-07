@@ -1,6 +1,8 @@
 -- User-centric wishlist-back-in feed: one row per (user, restocked wishlist item)
 -- for every verified user whose wishlisted item came back in stock during the
--- rolling window [?, ?) = [last Friday 00:00, this Friday 00:00).
+-- carry-over window [?, ?) (last ~21 days .. this Friday 00:00). The window is
+-- wider than a week so items that overflowed a user's 5-item cap earlier still
+-- surface on a later Friday; the per-(user,item) dedup below drains that queue.
 --
 -- "Back in stock" = a stock_logs restock event that moved all-stock 0 -> >0
 -- (Insert Stock adjustment). Covers BOTH ready items (status='ready') and PO

@@ -13,9 +13,16 @@ import (
 // wishlistBackInMaxItems caps how many restocked items one user's email lists.
 const wishlistBackInMaxItems = 5
 
-// wishlistBackInWindow is how far back the reader looks for restocks: the rolling
-// window [this Friday - 7d, this Friday 00:00) = last Friday 00:00 .. Thursday 23:59.
-const wishlistBackInWindow = 7 * 24 * time.Hour
+// wishlistBackInWindow is how far back a restock still counts as a pending
+// carry-over item. It is wider than one week (21 days ≈ 3 Fridays) so items that
+// overflowed a user's 5-item cap in an earlier week remain candidates and fire on
+// a later Friday — the queue behaviour ("continue to the next item id that has
+// not yet fired"). The per-(user,item) 90-day dedup drains the queue: an item
+// fires once, then is suppressed, letting the next un-fired item through. 21 days
+// keeps the weekly query fast (~1.5s) and the first-run blast bounded; an
+// un-fired item that never wins a slot ages out after 3 weeks. Widen it if longer
+// carry-over is wanted (cost grows: 30d ≈ 7s, 90d ≈ 17s).
+const wishlistBackInWindow = 21 * 24 * time.Hour
 
 // wishlistBackInRecoCount is the exact number of cross-sell recommendations the
 // "Gas, nemenin yang udah kamu beli" section needs; fewer -> the section is hidden.

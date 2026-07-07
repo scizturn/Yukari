@@ -140,7 +140,9 @@ Release mass-send tetap menunggu checklist operasional Makoto: preference center
 
 Kampanye **user-centric**: satu email per user berisi item wishlist **milik user itu sendiri** yang baru **balik stok** minggu ini. Beda dari discounted-wishlist yang mulai dari diskon, ini mulai dari **event restock** di `stock_logs`.
 
-**Kapan jalan.** Reader self-gating: `go run ./cmd/yukari wishlist-back-in` hanya bekerja hari **Jumat** (hari lain langsung return 0). Window scan restock **rolling 7 hari** dihitung otomatis: `[Jumat lalu 00:00, Jumat ini 00:00)` di `YUKARI_TIMEZONE` (= Jumat lalu s/d Kamis 23:59). Tidak ada `START_AT`.
+**Kapan jalan.** Reader self-gating: `go run ./cmd/yukari wishlist-back-in` hanya bekerja hari **Jumat** (hari lain langsung return 0). Window scan restock **~21 hari** (carry-over) dihitung otomatis dari tanggal run di `YUKARI_TIMEZONE`. Tidak ada `START_AT`.
+
+**Carry-over.** Tiap user dibatasi maks 5 item/email. Kalau item yang restock lebih dari 5, sisanya **tidak hilang**: window 21 hari + dedup per-(user,item) bikin item yang belum ke-fire tetap jadi kandidat dan difire di Jumat berikutnya, sampai antriannya habis (atau item umur restock-nya lewat 21 hari). Contoh: 6 item balik → 5 difire Jumat ini, 1 sisanya Jumat depan.
 
 **"Balik stok" = event `stock_logs`** dengan `is_restock=1`, `type='increase'`, `description='Increased via Insert Stock (Adjusment)'`, dan JSON `before_all_stock=0 → after_all_stock>0`. Berlaku untuk item **`ready`** maupun **`PO`** yang slotnya reopen; PO di-guard `po_deadline IS NULL OR po_deadline >= CURRENT_DATE` supaya PO yang sudah tutup tidak ikut.
 
@@ -149,13 +151,13 @@ Kampanye **user-centric**: satu email per user berisi item wishlist **milik user
 User + item dipilih hanya jika:
 
 - user punya **verified email**;
-- item ada di **wishlist user**, dan punya event restock 0→>0 (di atas) **dalam window 7 hari**;
+- item ada di **wishlist user**, dan punya event restock 0→>0 (di atas) **dalam window ~21 hari** (carry-over);
 - item sekarang `stock>0`, `is_available=1`, status `ready`/`PO` (PO deadline masih buka), non-adult;
 - user **belum** dikirimi item tersebut dalam **90 hari terakhir** (dedup per `(user, item)` via `email_delivery_logs.metadata.item_ids`, cooldown 90 hari — restock lagi setelah >90 hari boleh re-notify).
 
 Tiap user diberi **maksimum 5 item** per email, diurut **restock terbaru** dulu. Item pertama (hero) dipakai untuk mencari **companion** (`wishlist_back_in_companion.sql`): satu item yang **sudah dibeli** user di series/kategori yang sama; jika tidak ada, companion kosong dan bagian "Gas, nemenin…" hilang (fallback N/A).
 
-**PERF.** Query (`wishlist_back_in_user_items.sql`) memakai `STRAIGHT_JOIN` dengan `stock_logs` sebagai driving table supaya window kecil memangkas lebih dulu — tanpa ini planner full-scan `items` (~215k row, 70s+). ~1–3s untuk window 7 hari, tanpa disk temp table.
+**PERF.** Query (`wishlist_back_in_user_items.sql`) memakai `STRAIGHT_JOIN` dengan `stock_logs` sebagai driving table supaya window memangkas lebih dulu — tanpa ini planner full-scan `items` (~215k row, 70s+). ~1.5s untuk window 21 hari, tanpa disk temp table (30d ≈ 7s, 90d ≈ 17s kalau window diperlebar).
 
 ### Development checklist
 

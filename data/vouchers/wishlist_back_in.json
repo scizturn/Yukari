@@ -1,24 +1,45 @@
 {
-  "code_prefix": "BACKIN",
-  "name": "Wishlist Back In",
-  "description": "Voucher dua minggu untuk item wishlist yang tersedia kembali.",
+  "rules": [
+    {
+      "type": "item_age_min",
+      "operator": "include",
+      "value": "30"
+    },
+    {
+      "type": "item_id",
+      "operator": "include",
+      "value": "{{item_ids}}"
+    }
+  ],
+  "name": "Wishlist Back In 🎉",
+  "code": "WBIAAISJUEDHOKALDJLGYYE",
+  "description": null,
   "type": "discount_percent",
   "amount": "10",
-  "max_discount": "100000",
-  "min_purchase": "0",
+  "max_discount": "150000",
+  "min_purchase": null,
+  "start_at": "2026-07-07T14:30",
+  "expired_at": "2029-01-01T14:30",
   "distribution": "manual",
   "requires_claim": 1,
+  "is_active": 1,
   "usage_limit_total": null,
-  "max_claim_total": "1",
+  "max_claim_total": null,
   "usage_limit_per_user": "1",
   "claim_animation": "envelope",
-  "duration_days": 14,
-  "pricing_voucher_id": null,
-  "rules": [],
-  "business_rules": [],
+  "pricing_voucher_id": 10352,
+  "business_rules": [
+    {
+      "type": "gp_ratio_min",
+      "operator": "include",
+      "value": "45"
+    }
+  ],
   "basic_info": {
-    "item_types": ["ready"],
-    "user_roles": ["user"],
+    "item_types": [],
+    "user_roles": [
+      "user"
+    ],
     "is_partner": 0,
     "specific_user_ids": "",
     "account_age_min": "",
