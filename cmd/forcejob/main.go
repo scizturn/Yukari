@@ -9,7 +9,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: forcejob <campaign>")
-		fmt.Fprintln(os.Stderr, "campaigns: birthday, anniversary, leftover-cart, discounted-wishlist, winback, po-ready")
+		fmt.Fprintln(os.Stderr, "campaigns: birthday, anniversary, leftover-cart, discounted-wishlist, winback, wishlist-back-in, po-ready")
 		os.Exit(1)
 	}
 	switch os.Args[1] {
@@ -23,9 +23,11 @@ func main() {
 		runDiscountedWishlist()
 	case "winback":
 		runWinback()
+	case "wishlist-back-in":
+		runWishlistBackIn()
 	case "po-ready":
 		runPoReady()
 	default:
-		log.Fatalf("unknown campaign: %q  (valid: birthday, anniversary, leftover-cart, discounted-wishlist, winback, po-ready)", os.Args[1])
+		log.Fatalf("unknown campaign: %q  (valid: birthday, anniversary, leftover-cart, discounted-wishlist, winback, wishlist-back-in, po-ready)", os.Args[1])
 	}
 }

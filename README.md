@@ -168,7 +168,11 @@ go test ./...
 # 2. Lihat payload dari data production-like tanpa enqueue
 go run ./cmd/previewjob-wishlist-back-in
 
-# 3. Jalankan batch (hanya efektif hari Jumat; hari lain no-op)
+# 3. Enqueue satu user untuk seed/test send (bypass window & dedup; bikin voucher
+#    asli via pricing head — user_id / email / name)
+YUKARI_FORCE_USER=12345 go run ./cmd/forcejob wishlist-back-in
+
+# 4. Jalankan batch (hanya efektif hari Jumat; hari lain no-op)
 go run ./cmd/yukari wishlist-back-in
 ```
 

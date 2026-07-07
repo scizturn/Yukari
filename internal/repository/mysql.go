@@ -28,7 +28,7 @@ func OpenMySQLStore(dsn string, loader sqlfiles.Loader) (*MySQLStore, error) {
 }
 
 func NewMySQLStore(db *sql.DB, loader sqlfiles.Loader) (*MySQLStore, error) {
-	names := []string{"birthday_users", "wishlist_items", "wishlist_items_winback", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill", "winback_users", "winback_fill_items", "wishlist_back_in_user_items", "wishlist_back_in_companion", "wishlist_back_in_reco", "po_ready_orders", "po_ready_items"}
+	names := []string{"birthday_users", "wishlist_items", "wishlist_items_winback", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill", "winback_users", "winback_fill_items", "wishlist_back_in_user_items", "wishlist_back_in_companion", "wishlist_back_in_reco", "wishlist_back_in_forced_items", "po_ready_orders", "po_ready_items"}
 	queries := make(map[string]string, len(names))
 	for _, name := range names {
 		query, err := loader.Read(name)
@@ -351,6 +351,30 @@ func (s *MySQLStore) WishlistBackInCompanion(ctx context.Context, userID, itemID
 
 func (s *MySQLStore) WishlistBackInRecommendations(ctx context.Context, userID, anchorItemID string) ([]domain.WishlistBackInItem, error) {
 	rows, err := s.db.QueryContext(ctx, s.queries["wishlist_back_in_reco"], anchorItemID, userID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []domain.WishlistBackInItem
+	for rows.Next() {
+		var item domain.WishlistBackInItem
+		if err := rows.Scan(
+			&item.ID, &item.Name, &item.URL, &item.ImageURL, &item.Price, &item.Status,
+			&item.Manufacturer, &item.SeriesName, &item.CategoryName, &item.RestockedAt,
+			&item.DiscountPrice, &item.DownPayment,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// WishlistBackInForcedItems is used by forcejob to seed a test send: a user's
+// available wishlist items, bypassing the restock-window + dedup eligibility.
+func (s *MySQLStore) WishlistBackInForcedItems(ctx context.Context, userID string) ([]domain.WishlistBackInItem, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["wishlist_back_in_forced_items"], userID)
 	if err != nil {
 		return nil, err
 	}
