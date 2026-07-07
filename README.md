@@ -91,8 +91,8 @@ YUKARI_ANNIVERSARY_VOUCHER_CONFIG=data/vouchers/anniversary.json
 # Discounted wishlist
 YUKARI_DISCOUNTED_WISHLIST_QUEUE_NAME=discounted_wishlist_email_jobs
 
-# Wishlist back-in (reader hanya jalan hari Jumat; window rolling 7 hari dihitung
-# otomatis dari tanggal run — tidak ada START_AT)
+# Wishlist back-in (reader hanya jalan hari Jumat; window carry-over ~21 hari
+# dihitung otomatis dari tanggal run — tidak ada START_AT)
 YUKARI_WISHLIST_BACK_IN_QUEUE_NAME=wishlist_back_in_email_jobs
 YUKARI_WISHLIST_BACK_IN_VOUCHER_CONFIG=data/vouchers/wishlist_back_in.json
 ```
@@ -155,9 +155,19 @@ User + item dipilih hanya jika:
 - item sekarang `stock>0`, `is_available=1`, status `ready`/`PO` (PO deadline masih buka), non-adult;
 - user **belum** dikirimi item tersebut dalam **90 hari terakhir** (dedup per `(user, item)` via `email_delivery_logs.metadata.item_ids`, cooldown 90 hari — restock lagi setelah >90 hari boleh re-notify).
 
-Tiap user diberi **maksimum 5 item** per email, diurut **restock terbaru** dulu. Item pertama (hero) dipakai untuk mencari **companion** (`wishlist_back_in_companion.sql`): satu item yang **sudah dibeli** user di series/kategori yang sama; jika tidak ada, companion kosong dan bagian "Gas, nemenin…" hilang (fallback N/A).
+Tiap user diberi **maksimum 5 item** per email, diurut **restock terbaru** dulu.
+
+**Section "Gas, Nemenin Yang Udah Kamu Beli" (cross-sell).** Anchor = satu item yang **sudah dibeli** user, se-series/kategori dengan hero item (`wishlist_back_in_companion.sql`). Dari situ ditarik **6 item Most Popular Kyou** (`kyou_search_score` live 14 hari — cermin fill winback) di series/kategori yang sama (`wishlist_back_in_reco.sql`), **exclude** item yang sudah dibeli/di-wishlist, ready/in-stock/non-adult/non-admin/non-Wakeari. Section hanya tampil kalau ada anchor **dan** genap 6 rekomendasi; kalau kurang → hilang (N/A).
+
+**Harga & badge** mengikuti hanamaru persis: badge status (`ready`/`PO`/`LPO`/`BO`/Revive), harga diskon (harga diskon + coret asli, hanya kalau `discount_qty > 0` aktif) atau DP (`DP IDR <dp> / <full>` untuk PO), else harga polos. Dirender di Makoto.
 
 **PERF.** Query (`wishlist_back_in_user_items.sql`) memakai `STRAIGHT_JOIN` dengan `stock_logs` sebagai driving table supaya window memangkas lebih dulu — tanpa ini planner full-scan `items` (~215k row, 70s+). ~1.5s untuk window 21 hari, tanpa disk temp table (30d ≈ 7s, 90d ≈ 17s kalau window diperlebar).
+
+## Wishlist Back-In Voucher
+
+Config: `data/vouchers/wishlist_back_in.json` (`pricing_voucher_id` = head; kode per-user di-generate `WBI`+HMAC per ISO week). Tiap voucher **scoped**: rule `user` (hardcoded — cuma user itu) + rule `item_id = {{item_ids}}` (cuma item yang restock di email itu) + `item_age_min`/`gp_ratio_min` dari config. `item_types: []` → item **PO** juga bisa pakai. Default 10% off max 150k, 14 hari, `requires_claim`, 1×/user.
+
+**Anti-spam (1 voucher hidup/user).** Sebelum bikin voucher baru, reader cek apakah user masih punya voucher WBI **aktif & belum dipakai** (`voucher_claims.used_at` NULL). Kalau ya → **reuse**, item baru cuma **ditambah** ke `item_id` rule-nya (nggak bikin voucher baru). Kalau sudah dipakai (atau expired) → voucher baru di-generate walau belum 14 hari (voucher one-shot yang sudah dipakai = selesai). Logika di `internal/repository/voucher.go` (`reusableWishlistBackInVoucher` + `extendItemIDRule`).
 
 ### Development checklist
 
@@ -220,6 +230,17 @@ Timeout: 300
 ```
 
 ⚠️ **Jebakan UTC↔WIB.** Reader ngecek "hari Jumat" pakai `YUKARI_TIMEZONE` (Asia/Jakarta), sedangkan cron Coolify jalan di UTC. Pastikan waktunya tetap **Jumat di WIB** — mis. `0 13 * * 5` (Jumat 20:00 WIB) aman, tapi `0 20 * * 5` = Sabtu 03:00 WIB → reader lihat Sabtu → **no-op, kampanye minggu itu ke-skip** (bukan cuma telat: window-nya geser). Alternatif aman: cron harian `0 13 * * *` — reader no-op 6 hari, cuma Jumat yang kerja.
+
+**Seed/test send via Coolify (forcejob).** Buat kirim uji ke satu user tanpa nunggu Jumat, bikin task terpisah:
+
+```text
+Command: forcejob wishlist-back-in
+Environment: YUKARI_FORCE_USER=<user_id | email | nama>
+Frequency: (manual / on-demand — jalanin sekali)
+Timeout: 300
+```
+
+Ini bypass window & dedup (ambil item wishlist available user itu), **bikin voucher asli** (via pricing head), dan enqueue. Makoto yang aktif akan render + kirim ke user tsb — jadi pakai user test / email sendiri.
 
 Contoh task lama untuk birthday dan anniversary:
 
