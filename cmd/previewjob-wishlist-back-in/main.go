@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"log"
 	"os"
 	"strings"
 	"time"
 
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/kyou-id/yukari/internal/config"
 	"github.com/kyou-id/yukari/internal/domain"
 	"github.com/kyou-id/yukari/internal/repository"
@@ -35,33 +37,57 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	rows, err := store.WishlistBackInUserItems(ctx, startAt, cutoff)
-	if err != nil || len(rows) == 0 {
-		log.Fatalf("read wishlist back in user items: count=%d err=%v", len(rows), err)
-	}
 
 	forced := strings.TrimSpace(os.Getenv("YUKARI_FORCE_USER"))
-	user := rows[0].User
-	if forced != "" {
-		found := false
+
+	rows, err := store.WishlistBackInUserItems(ctx, startAt, cutoff)
+	if err != nil {
+		log.Fatalf("read wishlist back in user items: %v", err)
+	}
+
+	var user domain.User
+	var items []domain.WishlistBackInItem
+	inWindow := false
+	if forced == "" {
+		if len(rows) == 0 {
+			log.Fatal("no wishlist back in items in window; set YUKARI_FORCE_USER to preview a specific user")
+		}
+		user, inWindow = rows[0].User, true
+	} else {
 		for _, row := range rows {
 			if row.User.ID == forced {
-				user, found = row.User, true
+				user, inWindow = row.User, true
 				break
 			}
 		}
-		if !found {
-			log.Fatalf("forced user %s has no wishlist back in item in window", forced)
+	}
+
+	if inWindow {
+		for _, row := range rows {
+			if row.User.ID == user.ID && len(items) < maxItems {
+				items = append(items, row.Item)
+			}
+		}
+	} else {
+		// Forced user has no in-window restock; fall back to their available
+		// wishlist items (same source as forcejob) so any user can be previewed.
+		user, err = lookupUserByID(ctx, cfg.DatabaseDSN, forced)
+		if err != nil {
+			log.Fatalf("lookup forced user %s: %v", forced, err)
+		}
+		items, err = store.WishlistBackInForcedItems(ctx, user.ID)
+		if err != nil {
+			log.Fatalf("read forced wishlist items: %v", err)
+		}
+		if len(items) == 0 {
+			log.Fatalf("user %s has no available wishlist items to preview", user.ID)
+		}
+		if len(items) > maxItems {
+			items = items[:maxItems]
 		}
 	}
 
-	var items []domain.WishlistBackInItem
-	for _, row := range rows {
-		if row.User.ID == user.ID && len(items) < maxItems {
-			items = append(items, row.Item)
-		}
-	}
-	companion, err := store.WishlistBackInCompanion(ctx, user.ID, items[0].ID)
+	companion, err := store.WishlistBackInCompanion(ctx, user.ID)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -88,7 +114,23 @@ func main() {
 	if err := os.WriteFile(path, payload, 0o600); err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("preview job written: path=%s user_id=%s items=%d", path, user.ID, len(items))
+	log.Printf("preview job written: path=%s user_id=%s in_window=%t items=%d reco=%d", path, user.ID, inWindow, len(items), len(recos))
+}
+
+// lookupUserByID fetches a user's identity by exact user_id (for previewing a
+// specific user who has no restock in the detection window).
+func lookupUserByID(ctx context.Context, dsn, id string) (domain.User, error) {
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return domain.User{}, err
+	}
+	defer db.Close()
+	var user domain.User
+	err = db.QueryRowContext(ctx,
+		`SELECT CAST(user_id AS CHAR), name, email FROM users WHERE CAST(user_id AS CHAR) = ? LIMIT 1`, id,
+	).Scan(&user.ID, &user.Name, &user.Email)
+	user.IsActive = true
+	return user, err
 }
 
 func env(key, fallback string) string {

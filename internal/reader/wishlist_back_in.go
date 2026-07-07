@@ -30,7 +30,7 @@ const wishlistBackInRecoCount = 6
 
 type WishlistBackInStore interface {
 	WishlistBackInUserItems(ctx context.Context, startAt, endAt time.Time) ([]domain.WishlistBackInUserItem, error)
-	WishlistBackInCompanion(ctx context.Context, userID, itemID string) (domain.WishlistBackInItem, error)
+	WishlistBackInCompanion(ctx context.Context, userID string) (domain.WishlistBackInItem, error)
 	WishlistBackInRecommendations(ctx context.Context, userID, anchorItemID string) ([]domain.WishlistBackInItem, error)
 }
 
@@ -91,11 +91,11 @@ func (r WishlistBackInReader) Run(ctx context.Context, now time.Time) (int, erro
 			continue
 		}
 
-		// Anchor = an item the user already bought in the hero item's
+		// Anchor = the user's most recent completed (received) purchase that has a
 		// series/category. It names the "Gas, nemenin..." section and seeds the
 		// recommendations. Recommendations = 6 most-popular items in that
 		// series/category; the section only renders with a full 6.
-		companion, err := r.store.WishlistBackInCompanion(ctx, user.ID, items[0].ID)
+		companion, err := r.store.WishlistBackInCompanion(ctx, user.ID)
 		if err != nil {
 			return enqueued, err
 		}

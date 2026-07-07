@@ -56,8 +56,8 @@ func TestWishlistBackInBuildsOneJobPerUserWithTheirItems(t *testing.T) {
 	if first.VoucherCode == "" {
 		t.Fatal("expected voucher in job")
 	}
-	if len(store.companionItemIDs) != 2 || store.companionItemIDs[0] != "101" || store.companionItemIDs[1] != "103" {
-		t.Fatalf("companion should key off each user's hero (newest) item, got %v", store.companionItemIDs)
+	if len(store.companionUserIDs) != 2 || store.companionUserIDs[0] != "1" || store.companionUserIDs[1] != "2" {
+		t.Fatalf("companion should key off each user (not the wishlist item), got %v", store.companionUserIDs)
 	}
 	if second := queue.jobs[1]; second.UserID != "2" || len(second.Items) != 1 {
 		t.Fatalf("unexpected second job: %#v", second)
@@ -107,7 +107,7 @@ type fakeWishlistBackInStore struct {
 	companion        domain.WishlistBackInItem
 	recos            []domain.WishlistBackInItem
 	userItemsCalled  bool
-	companionItemIDs []string
+	companionUserIDs []string
 }
 
 func (s *fakeWishlistBackInStore) WishlistBackInUserItems(context.Context, time.Time, time.Time) ([]domain.WishlistBackInUserItem, error) {
@@ -115,8 +115,8 @@ func (s *fakeWishlistBackInStore) WishlistBackInUserItems(context.Context, time.
 	return s.rows, nil
 }
 
-func (s *fakeWishlistBackInStore) WishlistBackInCompanion(_ context.Context, _, itemID string) (domain.WishlistBackInItem, error) {
-	s.companionItemIDs = append(s.companionItemIDs, itemID)
+func (s *fakeWishlistBackInStore) WishlistBackInCompanion(_ context.Context, userID string) (domain.WishlistBackInItem, error) {
+	s.companionUserIDs = append(s.companionUserIDs, userID)
 	return s.companion, nil
 }
 

@@ -337,9 +337,9 @@ func (s *MySQLStore) WishlistBackInUserItems(ctx context.Context, startAt, endAt
 	return out, rows.Err()
 }
 
-func (s *MySQLStore) WishlistBackInCompanion(ctx context.Context, userID, itemID string) (domain.WishlistBackInItem, error) {
+func (s *MySQLStore) WishlistBackInCompanion(ctx context.Context, userID string) (domain.WishlistBackInItem, error) {
 	var item domain.WishlistBackInItem
-	err := s.db.QueryRowContext(ctx, s.queries["wishlist_back_in_companion"], itemID, userID).Scan(
+	err := s.db.QueryRowContext(ctx, s.queries["wishlist_back_in_companion"], userID).Scan(
 		&item.ID, &item.Name, &item.URL, &item.ImageURL, &item.Price, &item.Status,
 		&item.Manufacturer, &item.SeriesName, &item.CategoryName, &item.RestockedAt,
 	)

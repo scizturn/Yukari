@@ -51,7 +51,7 @@ func runWishlistBackIn() {
 	}
 
 	// Companion + recommendations use the same gating as the reader (need a full 6).
-	companion, err := store.WishlistBackInCompanion(ctx, user.ID, items[0].ID)
+	companion, err := store.WishlistBackInCompanion(ctx, user.ID)
 	if err != nil {
 		log.Fatalf("read companion: %v", err)
 	}
