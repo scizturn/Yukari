@@ -79,6 +79,34 @@ func TestRuleValueStoresMultipleValuesAsJSONArray(t *testing.T) {
 	}
 }
 
+func TestParseRuleValueHandlesScalarAndArray(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"", nil},
+		{"90", []string{"90"}},
+		{"[147044,147045]", []string{"147044", "147045"}},   // int array (how item_id is stored)
+		{`["6501","3634"]`, []string{"6501", "3634"}},        // string array (how series is stored)
+	}
+	for _, c := range cases {
+		got := parseRuleValue(c.in)
+		if len(got) != len(c.want) {
+			t.Fatalf("parseRuleValue(%q) = %v, want %v", c.in, got, c.want)
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Fatalf("parseRuleValue(%q)[%d] = %q, want %q", c.in, i, got[i], c.want[i])
+			}
+		}
+	}
+	// Round-trip: ruleValue -> parseRuleValue recovers the ids (order-preserving).
+	ids := []string{"16870", "18646", "29990"}
+	if got := parseRuleValue(ruleValue(ids)); len(got) != 3 || got[0] != "16870" || got[2] != "29990" {
+		t.Fatalf("round-trip failed: %v", got)
+	}
+}
+
 func TestAnniversaryVoucherNameUsesConfigAndUserName(t *testing.T) {
 	creator := MySQLVoucherCreator{
 		cfg: BirthdayVoucherConfig{Name: "🥳 Memberversarry!"}.withDefaults(),

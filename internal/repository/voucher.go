@@ -233,6 +233,26 @@ func (c *MySQLVoucherCreator) CreateWishlistBackInVoucher(ctx context.Context, u
 		}
 	}()
 
+	// Anti-spam: if this user still has a live (unexpired) WBI voucher they have
+	// NOT used yet, don't mint a new one — just widen its item scope to cover the
+	// newly restocked items. A used or expired voucher is not reusable, so a fresh
+	// voucher is issued then (even before 14 days: a one-shot voucher that was
+	// already redeemed is spent).
+	reusable, reuse, err := reusableWishlistBackInVoucher(ctx, tx, user.ID)
+	if err != nil {
+		return domain.Voucher{}, err
+	}
+	if reuse {
+		if err = extendItemIDRule(ctx, tx, reusable.ID, itemIDs); err != nil {
+			return domain.Voucher{}, err
+		}
+		if err = tx.Commit(); err != nil {
+			return domain.Voucher{}, err
+		}
+		reusable.Existed = true
+		return reusable, nil
+	}
+
 	existing, found, err := voucherByCode(ctx, tx, code)
 	if err != nil {
 		return domain.Voucher{}, err
@@ -307,6 +327,91 @@ INSERT INTO voucher_pricing_aliases (
 		return domain.Voucher{}, err
 	}
 	return domain.Voucher{ID: voucherID, Code: code}, nil
+}
+
+// reusableWishlistBackInVoucher finds this user's live, still-unused wishlist-
+// back-in voucher (WBI code, active, not expired, no claim marked used_at). Such
+// a voucher is reused (with its item scope widened) instead of minting a new one.
+func reusableWishlistBackInVoucher(ctx context.Context, tx *sql.Tx, userID string) (domain.Voucher, bool, error) {
+	var v domain.Voucher
+	err := tx.QueryRowContext(ctx, `
+SELECT v.id, v.code, v.created_at
+FROM vouchers v
+JOIN voucher_rules ur ON ur.voucher_id = v.id AND ur.rule_type = 'user' AND ur.rule_value = ?
+WHERE v.code LIKE 'WBI%'
+  AND v.is_active = 1
+  AND (v.expired_at IS NULL OR v.expired_at > NOW())
+  AND NOT EXISTS (
+    SELECT 1 FROM voucher_claims vc
+    WHERE vc.voucher_id = v.id AND vc.used_at IS NOT NULL
+  )
+ORDER BY v.expired_at DESC
+LIMIT 1`, userID).Scan(&v.ID, &v.Code, &v.CreatedAt)
+	if err == sql.ErrNoRows {
+		return domain.Voucher{}, false, nil
+	}
+	if err != nil {
+		return domain.Voucher{}, false, err
+	}
+	return v, true, nil
+}
+
+// extendItemIDRule unions newItemIDs into a voucher's existing item_id include
+// rule (creating it if absent), so a reused voucher covers newly restocked items.
+func extendItemIDRule(ctx context.Context, tx *sql.Tx, voucherID int64, newItemIDs []string) error {
+	var current sql.NullString
+	err := tx.QueryRowContext(ctx, `
+SELECT rule_value FROM voucher_rules
+WHERE voucher_id = ? AND rule_type = 'item_id'
+LIMIT 1`, voucherID).Scan(&current)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+
+	seen := map[string]bool{}
+	var union []string
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			return
+		}
+		seen[id] = true
+		union = append(union, id)
+	}
+	for _, id := range parseRuleValue(current.String) {
+		add(id)
+	}
+	for _, id := range newItemIDs {
+		add(id)
+	}
+
+	if err == sql.ErrNoRows {
+		return insertRule(ctx, tx, voucherID, "item_id", union, "include")
+	}
+	_, err = tx.ExecContext(ctx, `
+UPDATE voucher_rules SET rule_value = ?, updated_at = NOW()
+WHERE voucher_id = ? AND rule_type = 'item_id'`, ruleValue(union), voucherID)
+	return err
+}
+
+// parseRuleValue reads a voucher_rules.rule_value that is either a bare scalar
+// ("123") or a JSON array ("[123,456]" / "[\"123\"]").
+func parseRuleValue(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	if strings.HasPrefix(value, "[") {
+		var arr []json.RawMessage
+		if json.Unmarshal([]byte(value), &arr) == nil {
+			out := make([]string, 0, len(arr))
+			for _, e := range arr {
+				out = append(out, strings.Trim(strings.TrimSpace(string(e)), `"`))
+			}
+			return out
+		}
+	}
+	return []string{value}
 }
 
 func (c *MySQLVoucherCreator) CreateAnniversaryVoucher(ctx context.Context, user domain.User, anniversaryDate time.Time, itemIDs []string) (domain.Voucher, error) {
