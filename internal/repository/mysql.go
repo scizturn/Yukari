@@ -328,6 +328,7 @@ func (s *MySQLStore) WishlistBackInUserItems(ctx context.Context, startAt, endAt
 			&row.User.ID, &row.User.Name, &row.User.Email, &row.User.IsActive,
 			&row.Item.ID, &row.Item.Name, &row.Item.URL, &row.Item.ImageURL, &row.Item.Price, &row.Item.Status,
 			&row.Item.Manufacturer, &row.Item.SeriesName, &row.Item.CategoryName, &row.Item.RestockedAt,
+			&row.Item.DiscountPrice, &row.Item.DownPayment,
 		); err != nil {
 			return nil, err
 		}
@@ -361,6 +362,7 @@ func (s *MySQLStore) WishlistBackInRecommendations(ctx context.Context, userID, 
 		if err := rows.Scan(
 			&item.ID, &item.Name, &item.URL, &item.ImageURL, &item.Price, &item.Status,
 			&item.Manufacturer, &item.SeriesName, &item.CategoryName, &item.RestockedAt,
+			&item.DiscountPrice, &item.DownPayment,
 		); err != nil {
 			return nil, err
 		}

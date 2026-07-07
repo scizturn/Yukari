@@ -24,7 +24,14 @@ SELECT
   COALESCE(m.name, '')                                            AS manufacturer,
   COALESCE(s.name, '')                                            AS series_name,
   COALESCE(c.name, '')                                            AS category_name,
-  COALESCE(i.restocked_at, i.updated_at, i.created_at, CURRENT_TIMESTAMP) AS restocked_at
+  COALESCE(i.restocked_at, i.updated_at, i.created_at, CURRENT_TIMESTAMP) AS restocked_at,
+  CASE WHEN i.discount_price > 0 AND i.discount_price < ip.price
+       AND i.discount_name IS NOT NULL AND i.discount_name <> ''
+       AND i.discount_qty > 0
+       AND i.discount_start_date IS NOT NULL AND i.discount_end_date IS NOT NULL
+       AND i.discount_start_date <= CURDATE() AND i.discount_end_date >= CURDATE()
+     THEN i.discount_price ELSE 0 END                             AS discount_price,
+  0                                                               AS down_payment
 FROM items i
 JOIN item_products ip ON ip.item_id = i.item_id
 JOIN item_products target ON target.item_id = ?

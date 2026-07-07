@@ -34,7 +34,15 @@ SELECT STRAIGHT_JOIN
   COALESCE(m.name, '')                                            AS manufacturer,
   COALESCE(s.name, '')                                            AS series_name,
   COALESCE(c.name, '')                                            AS category_name,
-  MAX(sl.created_at)                                              AS restocked_at
+  MAX(sl.created_at)                                              AS restocked_at,
+  CASE WHEN i.discount_price > 0 AND i.discount_price < ip.price
+       AND i.discount_name IS NOT NULL AND i.discount_name <> ''
+       AND i.discount_qty > 0
+       AND i.discount_start_date IS NOT NULL AND i.discount_end_date IS NOT NULL
+       AND i.discount_start_date <= CURDATE() AND i.discount_end_date >= CURDATE()
+     THEN i.discount_price ELSE 0 END                             AS discount_price,
+  CASE WHEN i.status IN ('PO', 'LPO', 'BO', 'BPO') AND ip.po_down_payment > 0
+     THEN ip.po_down_payment ELSE 0 END                           AS down_payment
 FROM stock_logs sl
 JOIN items i ON i.item_id = sl.item_id
 JOIN item_products ip ON ip.item_id = i.item_id
