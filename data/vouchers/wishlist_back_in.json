@@ -26,6 +26,7 @@
   "usage_limit_total": null,
   "max_claim_total": null,
   "usage_limit_per_user": "1",
+  "duration_days": 14,
   "claim_animation": "envelope",
   "pricing_voucher_id": 10352,
   "business_rules": [
