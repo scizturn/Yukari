@@ -214,7 +214,57 @@ INSERT INTO voucher_pricing_aliases (
 	return domain.Voucher{ID: voucherID, Code: code}, nil
 }
 
-func (c *MySQLVoucherCreator) CreateWishlistBackInVoucher(ctx context.Context, user domain.User, campaignDate time.Time, itemIDs []string) (domain.Voucher, error) {
+// WishlistBackInCreator mints one wishlist-back-in voucher per user, routing to
+// the config for the discount tier the reader picked (8% for items with GP >= 35,
+// 6% for GP >= 25). Both tiers share a single DB pool.
+//
+// Each tier is a distinct voucher with its own `amount` and its own gp_ratio_min
+// rule, and points at its own pricing (head) voucher — hanayo takes the discount
+// from this voucher's `amount` (it never reads voucher_pricing_aliases), while
+// mitsuha takes the struck-through /search price from the head. They must agree.
+type WishlistBackInCreator struct {
+	db        *sql.DB
+	byPercent map[int]*MySQLVoucherCreator
+}
+
+// OpenWishlistBackInCreator builds a creator per tier, keyed by discount percent.
+// A config whose `amount` disagrees with its key is rejected: that mismatch would
+// silently mint a 6% voucher for an email promising 8%.
+func OpenWishlistBackInCreator(dsn string, cfgs map[int]BirthdayVoucherConfig, codeSecret string) (*WishlistBackInCreator, error) {
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Ping(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	byPercent := make(map[int]*MySQLVoucherCreator, len(cfgs))
+	for percent, cfg := range cfgs {
+		cfg = cfg.withDefaults()
+		if cfg.Amount.Value != percent {
+			_ = db.Close()
+			return nil, fmt.Errorf("wishlist back in tier %d%%: config amount is %d, must equal the tier", percent, cfg.Amount.Value)
+		}
+		byPercent[percent] = &MySQLVoucherCreator{db: db, cfg: cfg, codeSecret: codeSecret}
+	}
+	return &WishlistBackInCreator{db: db, byPercent: byPercent}, nil
+}
+
+func (c *WishlistBackInCreator) Close() error {
+	return c.db.Close()
+}
+
+// CreateWishlistBackInVoucher mints (or reuses) the voucher for discountPercent.
+func (c *WishlistBackInCreator) CreateWishlistBackInVoucher(ctx context.Context, user domain.User, campaignDate time.Time, itemIDs []string, discountPercent int) (domain.Voucher, error) {
+	creator, ok := c.byPercent[discountPercent]
+	if !ok {
+		return domain.Voucher{}, fmt.Errorf("no wishlist back in voucher config for %d%% tier", discountPercent)
+	}
+	return creator.createWishlistBackInVoucher(ctx, user, campaignDate, itemIDs, discountPercent)
+}
+
+func (c *MySQLVoucherCreator) createWishlistBackInVoucher(ctx context.Context, user domain.User, campaignDate time.Time, itemIDs []string, discountPercent int) (domain.Voucher, error) {
 	if !c.cfg.PricingVoucherID.Valid && strings.TrimSpace(c.cfg.PricingVoucherCode) == "" {
 		return domain.Voucher{}, fmt.Errorf("wishlist back in pricing voucher id or code is required")
 	}
@@ -222,7 +272,7 @@ func (c *MySQLVoucherCreator) CreateWishlistBackInVoucher(ctx context.Context, u
 		return domain.Voucher{}, fmt.Errorf("wishlist back in voucher user id is required")
 	}
 
-	code := c.wishlistBackInVoucherCode(user.ID, campaignDate)
+	code := c.wishlistBackInVoucherCode(user.ID, campaignDate, discountPercent)
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Voucher{}, err
@@ -233,12 +283,15 @@ func (c *MySQLVoucherCreator) CreateWishlistBackInVoucher(ctx context.Context, u
 		}
 	}()
 
-	// Anti-spam: if this user still has a live (unexpired) WBI voucher they have
-	// NOT used yet, don't mint a new one — just widen its item scope to cover the
-	// newly restocked items. A used or expired voucher is not reusable, so a fresh
-	// voucher is issued then (even before 14 days: a one-shot voucher that was
-	// already redeemed is spent).
-	reusable, reuse, err := reusableWishlistBackInVoucher(ctx, tx, user.ID)
+	// Anti-spam: if this user still has a live (unexpired) voucher of THIS tier
+	// they have NOT used yet, don't mint a new one — just widen its item scope to
+	// cover the newly restocked items. A used or expired voucher is not reusable,
+	// so a fresh voucher is issued then (even before 14 days: a one-shot voucher
+	// that was already redeemed is spent).
+	//
+	// Reuse is per tier: an 8% voucher cannot cover a GP-30 item (its gp_ratio_min
+	// is 35), so a user whose tier drops this week needs a real 6% voucher.
+	reusable, reuse, err := reusableWishlistBackInVoucher(ctx, tx, user.ID, discountPercent)
 	if err != nil {
 		return domain.Voucher{}, err
 	}
@@ -330,15 +383,23 @@ INSERT INTO voucher_pricing_aliases (
 }
 
 // reusableWishlistBackInVoucher finds this user's live, still-unused wishlist-
-// back-in voucher (WBI code, active, not expired, no claim marked used_at). Such
-// a voucher is reused (with its item scope widened) instead of minting a new one.
-func reusableWishlistBackInVoucher(ctx context.Context, tx *sql.Tx, userID string) (domain.Voucher, bool, error) {
+// back-in voucher for the given tier (active, not expired, no claim marked
+// used_at). Such a voucher is reused (with its item scope widened) instead of
+// minting a new one.
+//
+// The LIKE pattern must stay anchored on the tier prefix's trailing '-'. An
+// earlier version matched 'WBI%', which also matches a winback voucher ('WB' +
+// base32 HMAC) whose hash happens to start with 'I' — roughly 1 in 32. Those got
+// picked up here and had an item_id rule grafted onto them by extendItemIDRule,
+// narrowing a cart-wide 12% winback voucher down to five wishlist items, and the
+// winback code was then mailed out as the wishlist-back-in voucher.
+func reusableWishlistBackInVoucher(ctx context.Context, tx *sql.Tx, userID string, discountPercent int) (domain.Voucher, bool, error) {
 	var v domain.Voucher
 	err := tx.QueryRowContext(ctx, `
 SELECT v.id, v.code, v.created_at
 FROM vouchers v
 JOIN voucher_rules ur ON ur.voucher_id = v.id AND ur.rule_type = 'user' AND ur.rule_value = ?
-WHERE v.code LIKE 'WBI%'
+WHERE v.code LIKE ?
   AND v.is_active = 1
   AND (v.expired_at IS NULL OR v.expired_at > NOW())
   AND NOT EXISTS (
@@ -346,7 +407,7 @@ WHERE v.code LIKE 'WBI%'
     WHERE vc.voucher_id = v.id AND vc.used_at IS NOT NULL
   )
 ORDER BY v.expired_at DESC
-LIMIT 1`, userID).Scan(&v.ID, &v.Code, &v.CreatedAt)
+LIMIT 1`, userID, wishlistBackInTierPrefix(discountPercent)+"%").Scan(&v.ID, &v.Code, &v.CreatedAt)
 	if err == sql.ErrNoRows {
 		return domain.Voucher{}, false, nil
 	}
@@ -677,9 +738,20 @@ func (c *MySQLVoucherCreator) winbackVoucherCode(userID string, date time.Time) 
 	return code
 }
 
-func (c *MySQLVoucherCreator) wishlistBackInVoucherCode(userID string, date time.Time) string {
+// wishlistBackInTierPrefix is the voucher-code prefix for a discount tier, e.g.
+// "WBI8-". The trailing '-' is deliberate: it is absent from the base32 alphabet
+// (A-Z, 2-7) that the HMAC suffix is drawn from, so `code LIKE 'WBI8-%'` cannot
+// match any other campaign's code. Keep it.
+func wishlistBackInTierPrefix(discountPercent int) string {
+	return fmt.Sprintf("WBI%d-", discountPercent)
+}
+
+// wishlistBackInVoucherCode is deterministic per (user, ISO week, tier), so a
+// retry within the week reuses the same code. The tier is part of the key: a user
+// whose tier changes must get a distinct code, not collide with the other tier's.
+func (c *MySQLVoucherCreator) wishlistBackInVoucherCode(userID string, date time.Time, discountPercent int) string {
 	year, week := date.ISOWeek()
-	key := fmt.Sprintf("wishlist-back-in:%d-W%02d:user:%s", year, week, cleanCodePart(userID))
+	key := fmt.Sprintf("wishlist-back-in:%d-W%02d:tier:%d:user:%s", year, week, discountPercent, cleanCodePart(userID))
 	secret := c.codeSecret
 	if secret == "" {
 		secret = "preview-only"
@@ -687,7 +759,7 @@ func (c *MySQLVoucherCreator) wishlistBackInVoucherCode(userID string, date time
 	hash := hmac.New(sha256.New, []byte(secret))
 	_, _ = hash.Write([]byte(key))
 	code := strings.TrimRight(base32.StdEncoding.EncodeToString(hash.Sum(nil)), "=")[:13]
-	return "WBI" + code
+	return wishlistBackInTierPrefix(discountPercent) + code
 }
 
 func (cfg BirthdayVoucherConfig) withDefaults() BirthdayVoucherConfig {

@@ -12,14 +12,11 @@
     }
   ],
   "name": "Wishlist Back In 🎉",
-  "code": "WBIAAISJUEDHOKALDJLGYYE",
   "description": null,
   "type": "discount_percent",
-  "amount": "8",
+  "amount": "6",
   "max_discount": "150000",
   "min_purchase": null,
-  "start_at": "2026-07-07T14:30",
-  "expired_at": "2029-01-01T14:30",
   "distribution": "manual",
   "requires_claim": 1,
   "is_active": 1,
@@ -27,12 +24,12 @@
   "max_claim_total": null,
   "usage_limit_per_user": "1",
   "claim_animation": "envelope",
-  "pricing_voucher_id": 10352,
+  "pricing_voucher_id": 10747,
   "business_rules": [
     {
       "type": "gp_ratio_min",
       "operator": "include",
-      "value": "35"
+      "value": "25"
     }
   ],
   "basic_info": {

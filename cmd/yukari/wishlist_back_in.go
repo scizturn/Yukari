@@ -34,7 +34,12 @@ func runWishlistBackIn() {
 	if err != nil {
 		log.Fatalf("build wishlist back in voucher creator: %v", err)
 	}
+	// Keep the interface nil when there is no creator. Assigning a nil *T to an
+	// interface makes it non-nil, and the reader's `r.vouchers != nil` guard would
+	// then call through into a nil receiver.
+	var voucherCreator reader.WishlistBackInVoucherCreator
 	if vouchers != nil {
+		voucherCreator = vouchers
 		defer vouchers.Close()
 	}
 	auditLogger, err := buildAuditLogger(cfg)
@@ -45,7 +50,7 @@ func runWishlistBackIn() {
 		defer auditLogger.Close()
 	}
 
-	count, err := reader.NewWishlistBackIn(wbiStore, redisQueue, vouchers, auditLogger, cfg.WishlistBackInQueueName, cfg.ActionURL).Run(ctx, now)
+	count, err := reader.NewWishlistBackIn(wbiStore, redisQueue, voucherCreator, auditLogger, cfg.WishlistBackInQueueName, cfg.ActionURL).Run(ctx, now)
 	if err != nil {
 		log.Fatalf("wishlist back in reader failed: %v", err)
 	}

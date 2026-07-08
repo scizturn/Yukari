@@ -10,6 +10,7 @@ import (
 	"github.com/kyou-id/yukari/internal/config"
 	"github.com/kyou-id/yukari/internal/domain"
 	"github.com/kyou-id/yukari/internal/queue"
+	"github.com/kyou-id/yukari/internal/reader"
 	"github.com/kyou-id/yukari/internal/repository"
 	"github.com/kyou-id/yukari/internal/sqlfiles"
 )
@@ -71,36 +72,51 @@ func runWishlistBackIn() {
 		itemIDs[i] = it.ID
 	}
 
-	voucherCfg, err := repository.LoadBirthdayVoucherConfig(cfg.WishlistBackInVoucherConfigPath)
-	if err != nil {
-		log.Fatalf("load voucher config: %v", err)
-	}
-	voucherCreator, err := repository.OpenMySQLVoucherCreator(cfg.DatabaseDSN, voucherCfg, cfg.VoucherCodeSecret)
-	if err != nil {
-		log.Fatalf("open voucher creator: %v", err)
-	}
-	defer func() {
-		if err := voucherCreator.Close(); err != nil {
-			log.Printf("voucher db close failed: %v", err)
+	// Same tier rule the cron uses, so a forced send previews the real discount.
+	tier := reader.WishlistBackInTier(items)
+	var voucher domain.Voucher
+	if tier == 0 {
+		log.Printf("no wishlist item clears the %d%% GP floor; enqueuing without a voucher", 25)
+	} else {
+		voucherCfgs := map[int]repository.BirthdayVoucherConfig{}
+		for percent, path := range map[int]string{
+			8: cfg.WishlistBackInVoucherConfigPath,
+			6: cfg.WishlistBackInLowVoucherConfigPath,
+		} {
+			voucherCfg, err := repository.LoadBirthdayVoucherConfig(path)
+			if err != nil {
+				log.Fatalf("load %d%% voucher config: %v", percent, err)
+			}
+			voucherCfgs[percent] = voucherCfg
 		}
-	}()
-	// Existed=true just means the user's live voucher was reused (anti-spam) — fine.
-	voucher, err := voucherCreator.CreateWishlistBackInVoucher(ctx, user, now, itemIDs)
-	if err != nil {
-		log.Fatalf("create voucher: %v", err)
+		voucherCreator, err := repository.OpenWishlistBackInCreator(cfg.DatabaseDSN, voucherCfgs, cfg.VoucherCodeSecret)
+		if err != nil {
+			log.Fatalf("open voucher creator: %v", err)
+		}
+		defer func() {
+			if err := voucherCreator.Close(); err != nil {
+				log.Printf("voucher db close failed: %v", err)
+			}
+		}()
+		// Existed=true just means the user's live voucher was reused (anti-spam) — fine.
+		voucher, err = voucherCreator.CreateWishlistBackInVoucher(ctx, user, now, itemIDs, tier)
+		if err != nil {
+			log.Fatalf("create voucher: %v", err)
+		}
 	}
 
 	job := domain.WishlistBackInJob{
-		ID:            fmt.Sprintf("force-wishlist-back-in-%s-user-%s", now.Format("2006-01-02-150405"), user.ID),
-		UserID:        user.ID,
-		Date:          now,
-		User:          user,
-		VoucherCode:   voucher.Code,
-		VoucherID:     voucher.ID,
-		Items:         items,
-		CompanionItem: companion,
-		RecoItems:     recos,
-		Attempt:       1,
+		ID:                     fmt.Sprintf("force-wishlist-back-in-%s-user-%s", now.Format("2006-01-02-150405"), user.ID),
+		UserID:                 user.ID,
+		Date:                   now,
+		User:                   user,
+		VoucherCode:            voucher.Code,
+		VoucherID:              voucher.ID,
+		VoucherDiscountPercent: tier,
+		Items:                  items,
+		CompanionItem:          companion,
+		RecoItems:              recos,
+		Attempt:                1,
 	}
 
 	redisQueue := queue.NewRedisQueue(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB, cfg.QueueName)
@@ -113,8 +129,8 @@ func runWishlistBackIn() {
 		log.Fatalf("enqueue force job: %v", err)
 	}
 
-	log.Printf("forced wishlist back in job enqueued: queue=%s job_id=%s user_id=%s name=%q email=%s items=%d reco=%d voucher_id=%d voucher_code=%s reused=%t",
+	log.Printf("forced wishlist back in job enqueued: queue=%s job_id=%s user_id=%s name=%q email=%s items=%d reco=%d tier=%d%% voucher_id=%d voucher_code=%s reused=%t",
 		cfg.WishlistBackInQueueName, job.ID, user.ID, user.Name, maskEmail(user.Email),
-		len(items), len(recos), voucher.ID, voucher.Code, voucher.Existed,
+		len(items), len(recos), tier, voucher.ID, voucher.Code, voucher.Existed,
 	)
 }

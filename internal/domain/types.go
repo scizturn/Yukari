@@ -189,6 +189,14 @@ type WishlistBackInItem struct {
 	// DownPayment is the PO down payment (0 for ready items or no DP). When set,
 	// the template shows "DP IDR <dp> / <Price>".
 	DownPayment int `json:"down_payment,omitempty"`
+	// GPRatio is the item's gross-profit ratio in percent, computed with hanayo's
+	// formula (see wishlist_back_in_user_items.sql). nil when unknown (cogs
+	// missing), which is how hanayo treats it too: such an item passes no
+	// gp_ratio rule, so it never receives a voucher discount.
+	//
+	// Reader-only: it picks the voucher tier from it. Makoto has no use for cost
+	// data, so it stays out of the wire contract.
+	GPRatio *float64 `json:"-"`
 }
 
 // WishlistBackInJob is user-centric: one email per user listing up to 5 of the
@@ -201,7 +209,11 @@ type WishlistBackInJob struct {
 	User          User                 `json:"user"`
 	VoucherCode   string               `json:"voucher_code,omitempty"`
 	VoucherID     int64                `json:"voucher_id,omitempty"`
-	Items         []WishlistBackInItem `json:"items"`
+	// VoucherDiscountPercent is the tier the reader picked (8 or 6); 0 when no
+	// voucher was minted. The email prints it, so it must match the minted
+	// voucher's `amount` -- never hardcode it in a template.
+	VoucherDiscountPercent int                  `json:"voucher_discount_percent,omitempty"`
+	Items                  []WishlistBackInItem `json:"items"`
 	// CompanionItem is the item the user already bought that anchors the
 	// "Gas, nemenin yang udah kamu beli" section (shown as the header reference).
 	CompanionItem WishlistBackInItem `json:"companion_item"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/kyou-id/yukari/internal/audit"
@@ -28,6 +29,49 @@ const wishlistBackInWindow = 21 * 24 * time.Hour
 // "Gas, nemenin yang udah kamu beli" section needs; fewer -> the section is hidden.
 const wishlistBackInRecoCount = 6
 
+// Voucher tiers, by gross-profit floor. These mirror data/vouchers/
+// wishlist_back_in.json (8%) and wishlist_back_in_low.json (6%), and the two head
+// vouchers in prod. Change all four together or /search will quote a discount
+// checkout does not honour.
+const (
+	wishlistBackInHighPercent = 8
+	wishlistBackInHighMinGP   = 35.0
+	wishlistBackInLowPercent  = 6
+	wishlistBackInLowMinGP    = 25.0
+)
+
+// WishlistBackInTier picks the single discount tier for one user's email, or 0 for
+// "mint no voucher". Exported so forcejob mints the same tier the cron would.
+//
+// A user's email lists up to 5 items with different GP ratios, but a voucher has
+// exactly one `amount` and hanayo evaluates rules per cart item. So the tier is
+// driven by the LOWEST-GP item that still clears the 25% floor: that keeps every
+// item in the email covered, at the cost of billing a GP-40 item at 6% when it
+// shares an email with a GP-30 one.
+//
+// Items below 25% GP (and items whose GP is unknown, which hanayo refuses to
+// discount at all) are ignored here. They still appear in the email as restock
+// news; the voucher's gp_ratio_min simply never matches them at checkout.
+func WishlistBackInTier(items []domain.WishlistBackInItem) int {
+	minGP := math.Inf(1)
+	for _, item := range items {
+		if item.GPRatio == nil || *item.GPRatio < wishlistBackInLowMinGP {
+			continue
+		}
+		if *item.GPRatio < minGP {
+			minGP = *item.GPRatio
+		}
+	}
+	switch {
+	case math.IsInf(minGP, 1):
+		return 0
+	case minGP >= wishlistBackInHighMinGP:
+		return wishlistBackInHighPercent
+	default:
+		return wishlistBackInLowPercent
+	}
+}
+
 type WishlistBackInStore interface {
 	WishlistBackInUserItems(ctx context.Context, startAt, endAt time.Time) ([]domain.WishlistBackInUserItem, error)
 	WishlistBackInCompanion(ctx context.Context, userID string) (domain.WishlistBackInItem, error)
@@ -39,7 +83,7 @@ type WishlistBackInQueue interface {
 }
 
 type WishlistBackInVoucherCreator interface {
-	CreateWishlistBackInVoucher(ctx context.Context, user domain.User, campaignDate time.Time, itemIDs []string) (domain.Voucher, error)
+	CreateWishlistBackInVoucher(ctx context.Context, user domain.User, campaignDate time.Time, itemIDs []string, discountPercent int) (domain.Voucher, error)
 }
 
 type WishlistBackInAuditLogger interface {
@@ -115,25 +159,32 @@ func (r WishlistBackInReader) Run(ctx context.Context, now time.Time) (int, erro
 			itemIDs[j] = item.ID
 		}
 
+		// tier == 0 -> no item clears the 25% GP floor, so no voucher is minted.
+		// The email still goes out; it just renders without the coupon block.
+		tier := WishlistBackInTier(items)
 		var voucher domain.Voucher
-		if r.vouchers != nil {
-			voucher, err = r.vouchers.CreateWishlistBackInVoucher(ctx, user, cutoff, itemIDs)
+		if r.vouchers != nil && tier > 0 {
+			voucher, err = r.vouchers.CreateWishlistBackInVoucher(ctx, user, cutoff, itemIDs, tier)
 			if err != nil {
 				return enqueued, err
 			}
 		}
+		if voucher.Code == "" {
+			tier = 0
+		}
 
 		job := domain.WishlistBackInJob{
-			ID:            fmt.Sprintf("wishlist-back-in-%s-user-%s", cutoff.Format("2006-01-02"), user.ID),
-			UserID:        user.ID,
-			Date:          now,
-			User:          user,
-			VoucherCode:   voucher.Code,
-			VoucherID:     voucher.ID,
-			Items:         items,
-			CompanionItem: companion,
-			RecoItems:     recos,
-			Attempt:       1,
+			ID:                     fmt.Sprintf("wishlist-back-in-%s-user-%s", cutoff.Format("2006-01-02"), user.ID),
+			UserID:                 user.ID,
+			Date:                   now,
+			User:                   user,
+			VoucherCode:            voucher.Code,
+			VoucherID:              voucher.ID,
+			VoucherDiscountPercent: tier,
+			Items:                  items,
+			CompanionItem:          companion,
+			RecoItems:              recos,
+			Attempt:                1,
 		}
 		if err := r.insertQueued(ctx, job, itemIDs); err != nil {
 			return enqueued, err
@@ -170,12 +221,13 @@ func (r WishlistBackInReader) insertQueued(ctx context.Context, job domain.Wishl
 		ReferenceID: job.UserID,
 		Feature:     audit.FeatureWishlistBackIn,
 		Metadata: map[string]any{
-			"item_ids":     itemIDs,
-			"item_count":   len(job.Items),
-			"companion_id": job.CompanionItem.ID,
-			"voucher_id":   job.VoucherID,
-			"voucher_code": job.VoucherCode,
-			"claim_url":    claimURL,
+			"item_ids":                 itemIDs,
+			"item_count":               len(job.Items),
+			"companion_id":             job.CompanionItem.ID,
+			"voucher_id":               job.VoucherID,
+			"voucher_code":             job.VoucherCode,
+			"voucher_discount_percent": job.VoucherDiscountPercent,
+			"claim_url":                claimURL,
 		},
 	})
 }

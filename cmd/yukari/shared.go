@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -89,21 +90,49 @@ func buildWinbackVoucherCreator(cfg config.Config) (*repository.MySQLVoucherCrea
 	return repository.OpenMySQLVoucherCreator(cfg.DatabaseDSN, voucherCfg, cfg.VoucherCodeSecret)
 }
 
-func buildWishlistBackInVoucherCreator(cfg config.Config) (*repository.MySQLVoucherCreator, error) {
-	voucherCfg, err := repository.LoadBirthdayVoucherConfig(cfg.WishlistBackInVoucherConfigPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			log.Printf("wishlist back in voucher config %s not found; enqueuing without vouchers", cfg.WishlistBackInVoucherConfigPath)
-			return nil, nil
+// wishlistBackInTierConfigs loads both GP tiers. Unlike the other campaigns this
+// returns nil (enqueue without vouchers) only when BOTH configs are unusable —
+// a half-configured pair would silently downgrade every user to one tier.
+func wishlistBackInTierConfigs(cfg config.Config) (map[int]repository.BirthdayVoucherConfig, error) {
+	paths := map[int]string{
+		8: cfg.WishlistBackInVoucherConfigPath,
+		6: cfg.WishlistBackInLowVoucherConfigPath,
+	}
+	configs := make(map[int]repository.BirthdayVoucherConfig, len(paths))
+	for percent, path := range paths {
+		voucherCfg, err := repository.LoadBirthdayVoucherConfig(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				log.Printf("wishlist back in %d%% voucher config %s not found", percent, path)
+				continue
+			}
+			return nil, err
 		}
+		if !voucherCfg.PricingVoucherID.Valid && strings.TrimSpace(voucherCfg.PricingVoucherCode) == "" {
+			log.Printf("wishlist back in %d%% voucher config %s has no pricing voucher id or code", percent, path)
+			continue
+		}
+		configs[percent] = voucherCfg
+	}
+	return configs, nil
+}
+
+func buildWishlistBackInVoucherCreator(cfg config.Config) (*repository.WishlistBackInCreator, error) {
+	configs, err := wishlistBackInTierConfigs(cfg)
+	if err != nil {
 		return nil, err
 	}
-	if !voucherCfg.PricingVoucherID.Valid && strings.TrimSpace(voucherCfg.PricingVoucherCode) == "" {
-		log.Printf("wishlist back in voucher config %s has no pricing voucher id or code; enqueuing without vouchers", cfg.WishlistBackInVoucherConfigPath)
+	if len(configs) == 0 {
+		log.Print("no usable wishlist back in voucher config; enqueuing without vouchers")
 		return nil, nil
+	}
+	if len(configs) < 2 {
+		// Minting only one tier would hand a GP-30 item an 8% voucher it cannot
+		// use, or bill a GP-40 item at 6%. Neither is a silent-degradation case.
+		return nil, fmt.Errorf("wishlist back in needs both voucher tiers configured, got %d", len(configs))
 	}
 	if strings.TrimSpace(cfg.DatabaseDSN) == "" {
 		return nil, nil
 	}
-	return repository.OpenMySQLVoucherCreator(cfg.DatabaseDSN, voucherCfg, cfg.VoucherCodeSecret)
+	return repository.OpenWishlistBackInCreator(cfg.DatabaseDSN, configs, cfg.VoucherCodeSecret)
 }
