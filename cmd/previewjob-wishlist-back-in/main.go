@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/kyou-id/yukari/internal/config"
 	"github.com/kyou-id/yukari/internal/domain"
+	"github.com/kyou-id/yukari/internal/reader"
 	"github.com/kyou-id/yukari/internal/repository"
 	"github.com/kyou-id/yukari/internal/sqlfiles"
 )
@@ -101,10 +103,19 @@ func main() {
 			companion, recos = domain.WishlistBackInItem{}, nil
 		}
 	}
+	// Pick the tier the cron would pick, and stub a code that matches it. Makoto
+	// hides the coupon block when the percent is 0, so a preview without this
+	// would render an email that has no voucher at all.
+	tier := reader.WishlistBackInTier(items)
+	voucherCode := ""
+	if tier > 0 {
+		voucherCode = fmt.Sprintf("WBI%d-PREVIEW14D", tier)
+	}
 	job := domain.WishlistBackInJob{
 		ID:     "preview-wishlist-back-in-" + cutoff.Format("2006-01-02") + "-user-" + user.ID,
-		UserID: user.ID, Date: now, User: user, VoucherCode: "WBI-PREVIEW-14D",
-		Items: items, CompanionItem: companion, RecoItems: recos, Attempt: 1,
+		UserID: user.ID, Date: now, User: user, VoucherCode: voucherCode,
+		VoucherDiscountPercent: tier,
+		Items:                  items, CompanionItem: companion, RecoItems: recos, Attempt: 1,
 	}
 	payload, err := json.MarshalIndent(job, "", "  ")
 	if err != nil {
