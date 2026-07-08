@@ -44,12 +44,23 @@ SELECT STRAIGHT_JOIN
        AND i.discount_start_date <= CURDATE() AND i.discount_end_date >= CURDATE()
      THEN i.discount_price ELSE 0 END                             AS discount_price,
   CASE WHEN i.status IN ('PO', 'LPO', 'BO', 'BPO') AND ip.po_down_payment > 0
-     THEN ip.po_down_payment ELSE 0 END                           AS down_payment
+     THEN ip.po_down_payment ELSE 0 END                           AS down_payment,
+  -- Gross profit ratio, in percent. MUST stay identical to hanayo's
+  -- VoucherValidationService::getItemGpRatio(), which is what actually gates the
+  -- voucher at checkout: ((price - cogs) / price) * 100, price from item_products,
+  -- cogs from item_states. NULL when hanayo would also bail (cogs unknown or
+  -- price <= 0) -- such an item passes no gp_ratio rule, so it earns no discount.
+  -- cogs = 0 deliberately yields 100.0 here, exactly as hanayo computes it.
+  -- CAST to SIGNED first: both columns are UNSIGNED and cogs > price underflows.
+  CASE WHEN ist.cogs IS NULL OR ip.price <= 0 THEN NULL
+       ELSE ((CAST(ip.price AS SIGNED) - CAST(ist.cogs AS SIGNED)) / ip.price) * 100
+  END                                                             AS gp_ratio
 FROM stock_logs sl
 JOIN items i ON i.item_id = sl.item_id
 JOIN item_products ip ON ip.item_id = i.item_id
 JOIN wishlists w ON w.item_id = i.item_id
 JOIN users u ON u.user_id = w.user_id
+LEFT JOIN item_states ist ON ist.item_id = i.item_id
 LEFT JOIN manufactures m ON m.manufacture_id = ip.manufacture_id
 LEFT JOIN series s ON s.series_id = ip.series_id
 LEFT JOIN categories c ON c.category_id = ip.category_id
@@ -83,5 +94,5 @@ WHERE sl.is_restock = 1
       AND edl.created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
       AND JSON_CONTAINS(JSON_EXTRACT(edl.metadata, '$.item_ids'), JSON_QUOTE(CAST(i.item_id AS CHAR)))
   )
-GROUP BY u.user_id, u.name, u.email, i.item_id, i.name, img.path, ip.price, i.status, m.name, s.name, c.name
+GROUP BY u.user_id, u.name, u.email, i.item_id, i.name, img.path, ip.price, i.status, m.name, s.name, c.name, ist.cogs
 ORDER BY u.user_id, restocked_at DESC, i.item_id

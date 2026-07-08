@@ -21,10 +21,15 @@ SELECT
        AND i.discount_start_date <= CURDATE() AND i.discount_end_date >= CURDATE()
      THEN i.discount_price ELSE 0 END                             AS discount_price,
   CASE WHEN i.status IN ('PO', 'LPO', 'BO', 'BPO') AND ip.po_down_payment > 0
-     THEN ip.po_down_payment ELSE 0 END                           AS down_payment
+     THEN ip.po_down_payment ELSE 0 END                           AS down_payment,
+  -- See wishlist_back_in_user_items.sql for why this mirrors hanayo's formula.
+  CASE WHEN ist.cogs IS NULL OR ip.price <= 0 THEN NULL
+       ELSE ((CAST(ip.price AS SIGNED) - CAST(ist.cogs AS SIGNED)) / ip.price) * 100
+  END                                                             AS gp_ratio
 FROM wishlists w
 JOIN items i ON i.item_id = w.item_id
 JOIN item_products ip ON ip.item_id = i.item_id
+LEFT JOIN item_states ist ON ist.item_id = i.item_id
 LEFT JOIN manufactures m ON m.manufacture_id = ip.manufacture_id
 LEFT JOIN series s ON s.series_id = ip.series_id
 LEFT JOIN categories c ON c.category_id = ip.category_id
@@ -40,6 +45,6 @@ WHERE w.user_id = ?
   AND i.stock > 0
   AND i.is_available = 1
   AND COALESCE(i.isAdult, 0) = 0
-GROUP BY i.item_id, i.name, img.path, ip.price, i.status, m.name, s.name, c.name
+GROUP BY i.item_id, i.name, img.path, ip.price, i.status, m.name, s.name, c.name, ist.cogs
 ORDER BY restocked_at DESC, i.item_id
 LIMIT 5

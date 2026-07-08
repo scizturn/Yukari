@@ -2,6 +2,7 @@ package reader
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -26,9 +27,9 @@ func TestWishlistBackInBuildsOneJobPerUserWithTheirItems(t *testing.T) {
 	store := &fakeWishlistBackInStore{
 		// Rows arrive grouped by user, newest restock first (as the SQL orders).
 		rows: []domain.WishlistBackInUserItem{
-			{User: userA, Item: domain.WishlistBackInItem{ID: "101", Name: "Newest", RestockedAt: now.Add(-time.Hour)}},
-			{User: userA, Item: domain.WishlistBackInItem{ID: "102", Name: "Older", RestockedAt: now.Add(-48 * time.Hour)}},
-			{User: userB, Item: domain.WishlistBackInItem{ID: "103", Name: "Solo", RestockedAt: now.Add(-2 * time.Hour)}},
+			{User: userA, Item: domain.WishlistBackInItem{ID: "101", Name: "Newest", RestockedAt: now.Add(-time.Hour), GPRatio: gp(50)}},
+			{User: userA, Item: domain.WishlistBackInItem{ID: "102", Name: "Older", RestockedAt: now.Add(-48 * time.Hour), GPRatio: gp(40)}},
+			{User: userB, Item: domain.WishlistBackInItem{ID: "103", Name: "Solo", RestockedAt: now.Add(-2 * time.Hour), GPRatio: gp(30)}},
 		},
 		companion: domain.WishlistBackInItem{ID: "202", Name: "Purchased Pair"},
 		recos:     sixRecos(),
@@ -55,6 +56,14 @@ func TestWishlistBackInBuildsOneJobPerUserWithTheirItems(t *testing.T) {
 	}
 	if first.VoucherCode == "" {
 		t.Fatal("expected voucher in job")
+	}
+	// userA's items are GP 50 and 40 -> lowest clears 35 -> 8%. userB's lone item
+	// is GP 30 -> 6%. The percent on the job must match the voucher that was minted.
+	if first.VoucherDiscountPercent != 8 || first.VoucherCode != "WBI8-1" {
+		t.Fatalf("expected 8%% tier for userA, got %d%% code=%s", first.VoucherDiscountPercent, first.VoucherCode)
+	}
+	if second := queue.jobs[1]; second.VoucherDiscountPercent != 6 || second.VoucherCode != "WBI6-2" {
+		t.Fatalf("expected 6%% tier for userB, got %d%% code=%s", second.VoucherDiscountPercent, second.VoucherCode)
 	}
 	if len(store.companionUserIDs) != 2 || store.companionUserIDs[0] != "1" || store.companionUserIDs[1] != "2" {
 		t.Fatalf("companion should key off each user (not the wishlist item), got %v", store.companionUserIDs)
@@ -139,8 +148,82 @@ func (q *fakeWishlistBackInQueue) EnqueueWishlistBackInTo(_ context.Context, _ s
 	return nil
 }
 
-type fakeWishlistBackInVoucherCreator struct{}
+func gp(percent float64) *float64 { return &percent }
 
-func (fakeWishlistBackInVoucherCreator) CreateWishlistBackInVoucher(_ context.Context, user domain.User, _ time.Time, _ []string) (domain.Voucher, error) {
-	return domain.Voucher{ID: 1, Code: "WBI-" + user.ID}, nil
+// items builds a candidate list carrying only the field the tier rule reads.
+func gpItems(ratios ...*float64) []domain.WishlistBackInItem {
+	items := make([]domain.WishlistBackInItem, len(ratios))
+	for i, ratio := range ratios {
+		items[i] = domain.WishlistBackInItem{ID: fmt.Sprint(i), GPRatio: ratio}
+	}
+	return items
+}
+
+func TestWishlistBackInTier(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		items []domain.WishlistBackInItem
+		want  int
+	}{
+		{"all above the high floor", gpItems(gp(50), gp(40), gp(35)), 8},
+		{"exactly at the high floor", gpItems(gp(35)), 8},
+		{"a hair under the high floor drops the whole email", gpItems(gp(90), gp(34.9)), 6},
+		{"straddling both tiers bills at the lower one", gpItems(gp(40), gp(30)), 6},
+		{"exactly at the low floor", gpItems(gp(25)), 6},
+		{"below the low floor earns nothing", gpItems(gp(24.9)), 0},
+		// Sub-floor items are restock news, not discountable stock: they must not
+		// drag the tier down, because the voucher's gp_ratio_min already excludes
+		// them at checkout.
+		{"sub-floor items are ignored, not tier-setting", gpItems(gp(50), gp(10)), 8},
+		{"sub-floor items alongside a low-tier item", gpItems(gp(30), gp(10)), 6},
+		// hanayo refuses to apply any gp_ratio rule when cogs is unknown, so an
+		// unknown-GP item can neither earn nor lower a tier.
+		{"unknown GP is ignored, not tier-setting", gpItems(gp(50), nil), 8},
+		{"all unknown GP means no voucher", gpItems(nil, nil), 0},
+		{"no items", nil, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := WishlistBackInTier(tc.items); got != tc.want {
+				t.Fatalf("WishlistBackInTier() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// A user whose items all sit below the 25% GP floor still gets the restock email,
+// just without a coupon block — and no voucher row is burned on them.
+func TestWishlistBackInEnqueuesWithoutVoucherBelowGPFloor(t *testing.T) {
+	now := time.Date(2026, 6, 19, 9, 0, 0, 0, time.UTC)
+	user := domain.User{ID: "7", Name: "Thin Margin", Email: "t@example.test", IsActive: true}
+	store := &fakeWishlistBackInStore{
+		rows: []domain.WishlistBackInUserItem{
+			{User: user, Item: domain.WishlistBackInItem{ID: "301", RestockedAt: now.Add(-time.Hour), GPRatio: gp(20)}},
+		},
+	}
+	queue := &fakeWishlistBackInQueue{}
+	vouchers := &fakeWishlistBackInVoucherCreator{}
+
+	count, err := NewWishlistBackIn(store, queue, vouchers, nil, "wishlist_back_in_email_jobs", "https://kyou.id/user/my-voucher").Run(context.Background(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || len(queue.jobs) != 1 {
+		t.Fatalf("expected the email to still go out, count=%d jobs=%d", count, len(queue.jobs))
+	}
+	if len(vouchers.tiers) != 0 {
+		t.Fatalf("no voucher should have been minted, got tiers %v", vouchers.tiers)
+	}
+	job := queue.jobs[0]
+	if job.VoucherCode != "" || job.VoucherID != 0 || job.VoucherDiscountPercent != 0 {
+		t.Fatalf("expected a voucher-less job, got %#v", job)
+	}
+}
+
+type fakeWishlistBackInVoucherCreator struct {
+	tiers []int
+}
+
+func (f *fakeWishlistBackInVoucherCreator) CreateWishlistBackInVoucher(_ context.Context, user domain.User, _ time.Time, _ []string, discountPercent int) (domain.Voucher, error) {
+	f.tiers = append(f.tiers, discountPercent)
+	return domain.Voucher{ID: 1, Code: fmt.Sprintf("WBI%d-%s", discountPercent, user.ID)}, nil
 }

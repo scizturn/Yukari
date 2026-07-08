@@ -324,13 +324,17 @@ func (s *MySQLStore) WishlistBackInUserItems(ctx context.Context, startAt, endAt
 	var out []domain.WishlistBackInUserItem
 	for rows.Next() {
 		var row domain.WishlistBackInUserItem
+		var gpRatio sql.NullFloat64
 		if err := rows.Scan(
 			&row.User.ID, &row.User.Name, &row.User.Email, &row.User.IsActive,
 			&row.Item.ID, &row.Item.Name, &row.Item.URL, &row.Item.ImageURL, &row.Item.Price, &row.Item.Status,
 			&row.Item.Manufacturer, &row.Item.SeriesName, &row.Item.CategoryName, &row.Item.RestockedAt,
-			&row.Item.DiscountPrice, &row.Item.DownPayment,
+			&row.Item.DiscountPrice, &row.Item.DownPayment, &gpRatio,
 		); err != nil {
 			return nil, err
+		}
+		if gpRatio.Valid {
+			row.Item.GPRatio = &gpRatio.Float64
 		}
 		out = append(out, row)
 	}
@@ -383,12 +387,16 @@ func (s *MySQLStore) WishlistBackInForcedItems(ctx context.Context, userID strin
 	var items []domain.WishlistBackInItem
 	for rows.Next() {
 		var item domain.WishlistBackInItem
+		var gpRatio sql.NullFloat64
 		if err := rows.Scan(
 			&item.ID, &item.Name, &item.URL, &item.ImageURL, &item.Price, &item.Status,
 			&item.Manufacturer, &item.SeriesName, &item.CategoryName, &item.RestockedAt,
-			&item.DiscountPrice, &item.DownPayment,
+			&item.DiscountPrice, &item.DownPayment, &gpRatio,
 		); err != nil {
 			return nil, err
+		}
+		if gpRatio.Valid {
+			item.GPRatio = &gpRatio.Float64
 		}
 		items = append(items, item)
 	}

@@ -165,9 +165,23 @@ Tiap user diberi **maksimum 5 item** per email, diurut **restock terbaru** dulu.
 
 ## Wishlist Back-In Voucher
 
-Config: `data/vouchers/wishlist_back_in.json` (`pricing_voucher_id` = head; kode per-user di-generate `WBI`+HMAC per ISO week). Tiap voucher **scoped**: rule `user` (hardcoded — cuma user itu) + rule `item_id = {{item_ids}}` (cuma item yang restock di email itu) + `item_age_min`/`gp_ratio_min` dari config. `item_types: []` → item **PO** juga bisa pakai. Default 10% off max 150k, 14 hari, `requires_claim`, 1×/user.
+Tiap voucher **scoped**: rule `user` (hardcoded — cuma user itu) + rule `item_id = {{item_ids}}` (cuma item yang restock di email itu) + `item_age_min`/`gp_ratio_min` dari config. `item_types: []` → item **PO** juga bisa pakai. Max 150k, 14 hari, `requires_claim`, 1×/user.
 
-**Anti-spam (1 voucher hidup/user).** Sebelum bikin voucher baru, reader cek apakah user masih punya voucher WBI **aktif & belum dipakai** (`voucher_claims.used_at` NULL). Kalau ya → **reuse**, item baru cuma **ditambah** ke `item_id` rule-nya (nggak bikin voucher baru). Kalau sudah dipakai (atau expired) → voucher baru di-generate walau belum 14 hari (voucher one-shot yang sudah dipakai = selesai). Logika di `internal/repository/voucher.go` (`reusableWishlistBackInVoucher` + `extendItemIDRule`).
+**Dua tier GP.** Diskonnya bergantung margin item, dan satu user cuma dapat **satu** voucher (satu klaim). Reader menghitung GP tiap item restock dengan formula yang identik dengan hanayo — `((item_products.price − item_states.cogs) / price) × 100` — lalu memilih tier dari item ber-GP **terendah** yang masih ≥25%:
+
+| GP terendah (yang ≥25%) | Voucher | Config | `gp_ratio_min` |
+|---|---|---|---|
+| ≥ 35% | 8% | `data/vouchers/wishlist_back_in.json` | 35 |
+| 25–35% | 6% | `data/vouchers/wishlist_back_in_low.json` | 25 |
+| tidak ada item ≥25% | tidak ada voucher | — | — |
+
+Item ber-GP <25% (dan item yang `cogs`-nya NULL) **tidak menurunkan tier** — mereka tetap tampil di email sebagai kabar restock, tapi `gp_ratio_min` menolaknya di checkout. Konsekuensi yang disengaja: user yang punya item GP 40% dan 30% sekaligus dibilling 6% untuk keduanya (`reader.WishlistBackInTier`).
+
+**`amount` anak vs head voucher.** hanayo tidak pernah membaca `voucher_pricing_aliases` (`VoucherValidationService::validate` cuma `Voucher::byCode()`), jadi diskon nyata di checkout = `amount` voucher **anak**. mitsuha justru mengambil harga coret `/search` dari **head** (`voucher:<pricing_voucher_id>` di Redis). Keduanya harus sama angkanya — tiap tier punya head sendiri. `OpenWishlistBackInCreator` menolak config yang `amount`-nya tidak sama dengan tier-nya; head-nya harus kamu samakan manual di panel.
+
+**Anti-spam (1 voucher hidup/user/tier).** Sebelum bikin voucher baru, reader cek apakah user masih punya voucher WBI tier itu yang **aktif & belum dipakai** (`voucher_claims.used_at` NULL). Kalau ya → **reuse**, item baru cuma **ditambah** ke `item_id` rule-nya. Kalau sudah dipakai (atau expired) → voucher baru di-generate walau belum 14 hari (voucher one-shot yang sudah dipakai = selesai). Reuse dibatasi per tier: voucher 8% (`gp_ratio_min` 35) tidak bisa menutup item GP 30%. Logika di `internal/repository/voucher.go` (`reusableWishlistBackInVoucher` + `extendItemIDRule`).
+
+**Prefix kode.** Kode per-user = `WBI<tier>-` + HMAC base32 per ISO week, mis. `WBI8-K3M...`. Tanda `-` wajib: alfabet base32 (`A–Z`, `2–7`) tidak memuatnya, jadi `code LIKE 'WBI8-%'` tidak mungkin cocok dengan kode campaign lain. Versi lama memakai `WBI%`, yang juga cocok dengan kode **winback** (`WB` + HMAC yang kebetulan diawali `I`, ±1 dari 32) — voucher winback ikut terpungut sebagai "voucher WBI hidup", di-`extendItemIDRule` sehingga cakupannya menyempit jadi 5 item wishlist, dan kodenya dikirim di email wishlist-back-in.
 
 ### Development checklist
 
