@@ -82,7 +82,7 @@ func main() {
 		Date:           now,
 		User:           user,
 		Years:          years,
-		VoucherCode:    "ANVPREVIEW2026",
+		VoucherCode:    previewVoucherCode(ctx, cfg.DatabaseDSN, user.ID, "ANV%", "", "ANVPREVIEW2026"),
 		HistoricalItem: historicalItem,
 		WishlistItems:  wishlist,
 		PopularItems:   popularFYP,
@@ -133,4 +133,21 @@ func env(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+// previewVoucherCode returns the user's live, unused voucher for this campaign so
+// the preview shows the code they would really get. Falls back to a stub when
+// they have none. Read-only -- previews never mint.
+func previewVoucherCode(ctx context.Context, dsn, userID, codeLike, codeNotLike, stub string) string {
+	code, amount, found, err := repository.LiveVoucherCode(ctx, dsn, userID, codeLike, codeNotLike)
+	if err != nil {
+		log.Printf("voucher lookup failed (%v); using stub %s", err, stub)
+		return stub
+	}
+	if !found {
+		log.Printf("user %s has no live voucher matching %s; using stub %s", userID, codeLike, stub)
+		return stub
+	}
+	log.Printf("using real voucher %s (%d%%) for user %s", code, amount, userID)
+	return code
 }

@@ -103,13 +103,29 @@ func main() {
 			companion, recos = domain.WishlistBackInItem{}, nil
 		}
 	}
-	// Pick the tier the cron would pick, and stub a code that matches it. Makoto
-	// hides the coupon block when the percent is 0, so a preview without this
-	// would render an email that has no voucher at all.
+	// Pick the tier the cron would pick, then show the user's real voucher for that
+	// tier if they hold one. Makoto hides the coupon block when the percent is 0,
+	// so a preview without the tier would render an email with no voucher at all.
+	//
+	// Read-only: a preview never mints. A user with no live voucher of this tier
+	// gets a stub code, which looks identical in the rendered email.
 	tier := reader.WishlistBackInTier(items)
 	voucherCode := ""
 	if tier > 0 {
-		voucherCode = fmt.Sprintf("WBI%d-PREVIEW14D", tier)
+		prefix := fmt.Sprintf("WBI%d-", tier)
+		stub := prefix + "PREVIEW14D"
+		code, amount, found, err := repository.LiveVoucherCode(ctx, cfg.DatabaseDSN, user.ID, prefix+"%", "")
+		switch {
+		case err != nil:
+			log.Printf("voucher lookup failed (%v); using stub %s", err, stub)
+			voucherCode = stub
+		case !found:
+			log.Printf("user %s holds no live %d%% wishlist-back-in voucher; using stub %s", user.ID, tier, stub)
+			voucherCode = stub
+		default:
+			log.Printf("using real voucher %s (%d%%) for user %s", code, amount, user.ID)
+			voucherCode = code
+		}
 	}
 	job := domain.WishlistBackInJob{
 		ID:     "preview-wishlist-back-in-" + cutoff.Format("2006-01-02") + "-user-" + user.ID,

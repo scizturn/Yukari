@@ -82,7 +82,7 @@ func main() {
 		UserID:          user.ID,
 		Date:            now,
 		User:            user,
-		VoucherCode:     "KANGEN" + user.ID,
+		VoucherCode:     previewVoucherCode(ctx, cfg.DatabaseDSN, user.ID, "WB%", "WBI%", "KANGEN"+user.ID),
 		WishlistItems:   wishlist,
 		HistoricalItem:  historicalItem,
 		HistoricalItems: historicalItems,
@@ -157,4 +157,31 @@ func env(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// previewVoucherCode returns the user's live, unused voucher for this campaign so
+// the preview shows the code they would really get. Falls back to a stub when
+// they have none. Read-only -- previews never mint.
+//
+// codeNotLike "WBI%" matters: a winback code is "WB" + base32, so "WB%" also
+// matches every wishlist-back-in code -- verified against prod, where users
+// 31877 and 147044 would otherwise have had their WBI6-/WBI8- voucher shown in a
+// winback preview.
+//
+// The exclusion overshoots: a genuine winback code whose base32 hash starts with
+// "I" (roughly 1 in 32, e.g. user 189417's WBI3M65PSIYEH6MX) is dropped too, and
+// that user falls back to the stub. For a read-only preview a stub beats showing
+// another campaign's voucher.
+func previewVoucherCode(ctx context.Context, dsn, userID, codeLike, codeNotLike, stub string) string {
+	code, amount, found, err := repository.LiveVoucherCode(ctx, dsn, userID, codeLike, codeNotLike)
+	if err != nil {
+		log.Printf("voucher lookup failed (%v); using stub %s", err, stub)
+		return stub
+	}
+	if !found {
+		log.Printf("user %s has no live voucher matching %s; using stub %s", userID, codeLike, stub)
+		return stub
+	}
+	log.Printf("using real voucher %s (%d%%) for user %s", code, amount, userID)
+	return code
 }
