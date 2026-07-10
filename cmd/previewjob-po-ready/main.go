@@ -29,7 +29,7 @@ func main() {
 		log.Fatalf("load timezone: %v", err)
 	}
 	now := time.Now().In(location)
-	orderID := env("YUKARI_FORCE_ORDER", "")
+	userID := env("YUKARI_FORCE_USER", "")
 	outputPath := env("YUKARI_PREVIEW_JOB_PATH", "/Users/sleepyreinze/Dev/Email-Api/Makoto/templates/preview/po-ready-job.json")
 
 	store, err := repository.OpenMySQLStore(cfg.DatabaseDSN, sqlfiles.NewLoader(cfg.SQLDir))
@@ -37,28 +37,9 @@ func main() {
 		log.Fatalf("open store: %v", err)
 	}
 
-	// With no explicit order, take the first eligible order from the live query.
-	order, err := resolvePreviewOrder(ctx, store, cfg.DatabaseDSN, orderID)
+	job, err := buildPreviewJob(ctx, store, cfg.DatabaseDSN, now, userID)
 	if err != nil {
 		log.Fatal(err)
-	}
-
-	items, err := store.PoReadyItems(ctx, order.OrderID)
-	if err != nil {
-		log.Fatalf("read po ready items: %v", err)
-	}
-
-	job := domain.PoReadyJob{
-		ID:          fmt.Sprintf("preview-po-ready-%s-order-%s", now.Format("2006-01-02-150405"), order.OrderID),
-		OrderID:     order.OrderID,
-		UserID:      order.User.ID,
-		Date:        now,
-		User:        order.User,
-		Items:       items,
-		Remaining:   order.Remaining,
-		DownPayment: order.DownPayment,
-		ETA:         order.ETA,
-		Attempt:     1,
 	}
 
 	payload, err := json.MarshalIndent(job, "", "  ")
@@ -68,54 +49,70 @@ func main() {
 	if err := os.WriteFile(outputPath, payload, 0o600); err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("preview job written: path=%s order_id=%s user_id=%s items=%d remaining=%d", outputPath, order.OrderID, order.User.ID, len(items), order.Remaining)
+	log.Printf("preview job written: path=%s user_id=%s items=%d", outputPath, job.UserID, len(job.Items))
 }
 
-func resolvePreviewOrder(ctx context.Context, store *repository.MySQLStore, dsn, orderID string) (domain.PoReadyOrder, error) {
-	if strings.TrimSpace(orderID) == "" {
-		orders, err := store.PoReadyOrders(ctx)
+// previewWindow mirrors the reader's detection window so a preview with no forced
+// user reflects what the cron would actually pick up.
+const previewWindow = 7 * 24 * time.Hour
+
+// previewMaxItems mirrors the reader's per-user cap.
+const previewMaxItems = 5
+
+// buildPreviewJob previews the given user, or — with no YUKARI_FORCE_USER — the
+// first user the live eligibility query returns.
+func buildPreviewJob(ctx context.Context, store *repository.MySQLStore, dsn string, now time.Time, userID string) (domain.PoReadyJob, error) {
+	job := domain.PoReadyJob{Date: now, Attempt: 1}
+
+	if strings.TrimSpace(userID) == "" {
+		rows, err := store.PoReadyUserItems(ctx, now.Add(-previewWindow), now)
 		if err != nil {
-			return domain.PoReadyOrder{}, err
+			return job, err
 		}
-		if len(orders) == 0 {
-			return domain.PoReadyOrder{}, fmt.Errorf("no eligible po-ready orders found; set YUKARI_FORCE_ORDER to preview a specific order")
+		if len(rows) == 0 {
+			return job, fmt.Errorf("no eligible po-ready users found; set YUKARI_FORCE_USER to preview a specific user")
 		}
-		return orders[0], nil
+		job.User = rows[0].User
+		for _, row := range rows {
+			if row.User.ID != job.User.ID || len(job.Items) >= previewMaxItems {
+				break
+			}
+			job.Items = append(job.Items, row.Item)
+		}
+	} else {
+		user, err := lookupUserByID(ctx, dsn, userID)
+		if err != nil {
+			return job, err
+		}
+		items, err := store.PoReadyForcedItems(ctx, userID)
+		if err != nil {
+			return job, err
+		}
+		if len(items) == 0 {
+			return job, fmt.Errorf("user %s has no ready wishlist items to preview", userID)
+		}
+		job.User, job.Items = user, items
 	}
-	return findPreviewOrder(ctx, dsn, orderID)
+
+	job.UserID = job.User.ID
+	job.ID = fmt.Sprintf("preview-po-ready-%s-user-%s", now.Format("2006-01-02-150405"), job.UserID)
+	return job, nil
 }
 
-func findPreviewOrder(ctx context.Context, dsn, orderID string) (domain.PoReadyOrder, error) {
+// lookupUserByID fetches a user's identity by exact user_id (for previewing a
+// specific user who has no conversion in the detection window).
+func lookupUserByID(ctx context.Context, dsn, id string) (domain.User, error) {
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		return domain.PoReadyOrder{}, err
+		return domain.User{}, err
 	}
 	defer db.Close()
-	if err := db.PingContext(ctx); err != nil {
-		return domain.PoReadyOrder{}, err
-	}
-
-	var order domain.PoReadyOrder
-	var active bool
-	err = db.QueryRowContext(ctx, `
-SELECT
-  CAST(o.order_id AS CHAR),
-  CAST(o.user_id AS CHAR),
-  u.name,
-  u.email,
-  u.email_verified_at IS NOT NULL,
-  o.remaining,
-  COALESCE((SELECT SUM(oi.down_payment) FROM order_items oi WHERE oi.order_id = o.order_id), 0),
-  COALESCE(o.eta, '')
-FROM orders o
-JOIN users u ON u.user_id = o.user_id
-WHERE CAST(o.order_id AS CHAR) = ?
-LIMIT 1`, orderID).Scan(&order.OrderID, &order.User.ID, &order.User.Name, &order.User.Email, &active, &order.Remaining, &order.DownPayment, &order.ETA)
-	if err != nil {
-		return domain.PoReadyOrder{}, fmt.Errorf("order %s not found: %w", orderID, err)
-	}
-	order.User.IsActive = active
-	return order, nil
+	var user domain.User
+	err = db.QueryRowContext(ctx,
+		`SELECT CAST(user_id AS CHAR), name, email FROM users WHERE CAST(user_id AS CHAR) = ? LIMIT 1`, id,
+	).Scan(&user.ID, &user.Name, &user.Email)
+	user.IsActive = true
+	return user, err
 }
 
 func env(key, fallback string) string {

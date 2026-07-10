@@ -28,7 +28,7 @@ func OpenMySQLStore(dsn string, loader sqlfiles.Loader) (*MySQLStore, error) {
 }
 
 func NewMySQLStore(db *sql.DB, loader sqlfiles.Loader) (*MySQLStore, error) {
-	names := []string{"birthday_users", "wishlist_items", "wishlist_items_winback", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill", "winback_users", "winback_fill_items", "wishlist_back_in_user_items", "wishlist_back_in_companion", "wishlist_back_in_reco", "wishlist_back_in_forced_items", "po_ready_orders", "po_ready_items"}
+	names := []string{"birthday_users", "wishlist_items", "wishlist_items_winback", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill", "winback_users", "winback_fill_items", "wishlist_back_in_user_items", "wishlist_back_in_companion", "wishlist_back_in_reco", "wishlist_back_in_forced_items", "po_ready_user_items", "po_ready_forced_items"}
 	queries := make(map[string]string, len(names))
 	for _, name := range names {
 		query, err := loader.Read(name)
@@ -274,28 +274,32 @@ func (s *MySQLStore) discountedWishlistRows(ctx context.Context, query string, i
 	return items, rows.Err()
 }
 
-func (s *MySQLStore) PoReadyOrders(ctx context.Context) ([]domain.PoReadyOrder, error) {
-	rows, err := s.db.QueryContext(ctx, s.queries["po_ready_orders"])
+func (s *MySQLStore) PoReadyUserItems(ctx context.Context, startAt, endAt time.Time) ([]domain.PoReadyUserItem, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["po_ready_user_items"], startAt, endAt)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var orders []domain.PoReadyOrder
+	var out []domain.PoReadyUserItem
 	for rows.Next() {
-		var order domain.PoReadyOrder
-		var active bool
-		if err := rows.Scan(&order.OrderID, &order.User.ID, &order.User.Name, &order.User.Email, &active, &order.Remaining, &order.DownPayment, &order.ETA); err != nil {
+		var row domain.PoReadyUserItem
+		if err := rows.Scan(
+			&row.User.ID, &row.User.Name, &row.User.Email, &row.User.IsActive,
+			&row.Item.ID, &row.Item.Name, &row.Item.URL, &row.Item.ImageURL,
+			&row.Item.Price, &row.Item.ReadyAt, &row.Item.DiscountPrice,
+		); err != nil {
 			return nil, err
 		}
-		order.User.IsActive = active
-		orders = append(orders, order)
+		out = append(out, row)
 	}
-	return orders, rows.Err()
+	return out, rows.Err()
 }
 
-func (s *MySQLStore) PoReadyItems(ctx context.Context, orderID string) ([]domain.PoReadyItem, error) {
-	rows, err := s.db.QueryContext(ctx, s.queries["po_ready_items"], orderID)
+// PoReadyForcedItems is used by forcejob/previewjob to seed a test send: a user's
+// currently-ready wishlist items, ignoring the conversion window and the dedup.
+func (s *MySQLStore) PoReadyForcedItems(ctx context.Context, userID string) ([]domain.PoReadyItem, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["po_ready_forced_items"], userID)
 	if err != nil {
 		return nil, err
 	}
@@ -304,11 +308,9 @@ func (s *MySQLStore) PoReadyItems(ctx context.Context, orderID string) ([]domain
 	var items []domain.PoReadyItem
 	for rows.Next() {
 		var item domain.PoReadyItem
-		var quantity sql.NullInt64
-		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.ImageURL, &item.Price, &quantity); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.ImageURL, &item.Price, &item.ReadyAt, &item.DiscountPrice); err != nil {
 			return nil, err
 		}
-		item.Quantity = int(quantity.Int64)
 		items = append(items, item)
 	}
 	return items, rows.Err()

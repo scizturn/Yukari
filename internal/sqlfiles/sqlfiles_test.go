@@ -187,12 +187,80 @@ func TestWishlistBackInQueriesEnforceCampaignRules(t *testing.T) {
 		"ip.po_deadline IS NULL OR ip.po_deadline >= CURRENT_DATE",
 		"i.stock > 0",
 		"u.email_verified_at IS NOT NULL",
-		"edl.feature = 'wishlist_back_in'",
+		"edl.feature IN ('wishlist_back_in', 'po_ready')",
 		"JSON_CONTAINS",
 		"INTERVAL 90 DAY",
 	} {
 		if !strings.Contains(query, want) {
 			t.Fatalf("expected wishlist back in query to contain %q", want)
 		}
+	}
+}
+
+// The two campaigns are partitioned by event type. A conversion sends the item to
+// po-ready; a 0->>0 restock keeps it here. The gate below is what makes that
+// deterministic — without it the winner is whichever cron happens to run first.
+func TestBackInStandsDownOnItemsPoReadyWillClaim(t *testing.T) {
+	backIn, err := NewLoader("../../data/sql").Read("wishlist_back_in_user_items")
+	if err != nil {
+		t.Fatal(err)
+	}
+	poReady, err := NewLoader("../../data/sql").Read("po_ready_user_items")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{
+		"i.status = 'ready'",
+		"'convert po by excel'",
+		"'convert po manual'",
+		"'reconvert PO to ready'",
+		// Must mirror po-ready's own window, not "has ever been converted", or an
+		// item converted long ago and restocked today is rejected here while
+		// sitting outside po-ready's reach — announced by nobody.
+		"conv.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
+	} {
+		if !strings.Contains(backIn, want) {
+			t.Fatalf("expected wishlist back in gate to contain %q", want)
+		}
+	}
+
+	// The gate's window is only correct while po-ready's own window agrees with it.
+	// po_ready.go's poReadyWindow is the source of truth; this pins the SQL side.
+	if !strings.Contains(poReady, "last 7 days") {
+		t.Fatal("po ready window changed: update the 7-day gate in wishlist_back_in_user_items.sql to match")
+	}
+}
+
+func TestPoReadyQueryEnforcesCampaignRules(t *testing.T) {
+	query, err := NewLoader("../../data/sql").Read("po_ready_user_items")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		// The three admin paths that convert PO stock to ready. `reconvert PO to
+		// ready` alone would duplicate wishlist-back-in for 98% of its items.
+		"'convert po by excel'",
+		"'convert po manual'",
+		"'reconvert PO to ready'",
+		// The conversion events carry no stock data, so availability must come
+		// from current item state or the email links to an out-of-stock item.
+		"i.status = 'ready'",
+		"i.stock > 0",
+		"i.is_available = 1",
+		"u.email_verified_at IS NOT NULL",
+		// Dedup spans both item-news features, or one item earns two emails.
+		"edl.feature IN ('po_ready', 'wishlist_back_in')",
+		"JSON_CONTAINS",
+		"INTERVAL 90 DAY",
+	} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("expected po ready query to contain %q", want)
+		}
+	}
+	// One item logs one conversion row per branch; without the rollup a user's
+	// 5-item cap would be spent on duplicates of the same item.
+	if !strings.Contains(query, "MAX(sl.created_at)") || !strings.Contains(query, "GROUP BY") {
+		t.Fatal("expected po ready query to collapse per-branch conversion rows")
 	}
 }

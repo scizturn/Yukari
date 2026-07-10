@@ -20,6 +20,19 @@
 -- ids in the audit row's metadata.item_ids array (reference_id = user_id),
 -- matched via JSON_CONTAINS.
 --
+-- The cooldown spans BOTH item-news features: an item already announced by
+-- po-ready ("your PO item is now ready") is not announced again here as a
+-- restock, and vice versa. Keep the feature list in sync with
+-- po_ready_user_items.sql.
+--
+-- Separately from the cooldown, the two campaigns are partitioned by EVENT TYPE
+-- (the "gate" below): a 0->>0 restock row means the item is ours; a PO->ready
+-- conversion row means it is po-ready's. Items that trip both -- a conversion
+-- that also ended a stockout, or two nearby events -- go to po-ready. The gate
+-- is what makes the split deterministic; it does not depend on which cron runs
+-- first, and it is what keeps po-ready from stealing items that overflowed a
+-- user's 5-item cap here and are still queued for a later Friday.
+--
 -- Ordered user_id, then newest restock first so the reader can cap each user's
 -- list to the 5 most recently returned items.
 SELECT STRAIGHT_JOIN
@@ -85,10 +98,29 @@ WHERE sl.is_restock = 1
   AND COALESCE(i.isAdult, 0) = 0
   AND u.email_verified_at IS NOT NULL
   AND u.email IS NOT NULL AND u.email <> ''
+  -- EVENT GATE: an item whose PO stock was just converted belongs to po-ready,
+  -- not here. Some items trip both triggers (a conversion that also ended a
+  -- stockout, or a separate restock nearby); the conversion wins.
+  --
+  -- The condition must mirror po_ready_user_items.sql's eligibility EXACTLY --
+  -- same 7-day conversion window, same `status = 'ready'` -- not merely "has ever
+  -- been converted". Widen it and items fall between the two campaigns: an item
+  -- converted 20 days ago and restocked today would be rejected here while
+  -- sitting outside po-ready's window, and nobody would announce it.
+  AND NOT (
+    i.status = 'ready'
+    AND EXISTS (
+      SELECT 1
+      FROM stock_logs conv
+      WHERE conv.item_id = i.item_id
+        AND conv.description IN ('convert po by excel', 'convert po manual', 'reconvert PO to ready')
+        AND conv.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+    )
+  )
   AND NOT EXISTS (
     SELECT 1
     FROM email_delivery_logs edl
-    WHERE edl.feature = 'wishlist_back_in'
+    WHERE edl.feature IN ('wishlist_back_in', 'po_ready')
       AND edl.user_id = CAST(u.user_id AS CHAR)
       AND edl.status IN ('queued', 'sending', 'sent')
       AND edl.created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
