@@ -84,7 +84,10 @@ func WishlistBackInTier(items []domain.WishlistBackInItem) int {
 type WishlistBackInStore interface {
 	WishlistBackInUserItems(ctx context.Context, startAt, endAt time.Time) ([]domain.WishlistBackInUserItem, error)
 	WishlistBackInCompanion(ctx context.Context, userID string) (domain.WishlistBackInItem, error)
-	WishlistBackInRecommendations(ctx context.Context, userID, anchorItemID string) ([]domain.WishlistBackInItem, error)
+	// WishlistBackInPopularityScores loads the 14-day popularity map once so the
+	// per-user reco does not re-aggregate it. Passed into every reco call below.
+	WishlistBackInPopularityScores(ctx context.Context) (map[string]int64, error)
+	WishlistBackInRecommendations(ctx context.Context, userID, anchorItemID string, scores map[string]int64) ([]domain.WishlistBackInItem, error)
 }
 
 type WishlistBackInQueue interface {
@@ -135,8 +138,17 @@ func (r WishlistBackInReader) Run(ctx context.Context, now time.Time) (int, erro
 		return 0, err
 	}
 
+	// Load the 14-day popularity map once; each user's cross-sell reco ranks its
+	// series candidates against it instead of re-aggregating per user. Cross-sell is
+	// decoration, so if this fails we rank by recency alone rather than aborting.
+	scores, err := r.store.WishlistBackInPopularityScores(ctx)
+	if err != nil {
+		log.Printf("wishlist back in: popularity scores unavailable, ranking cross-sell by recency: %v", err)
+		scores = map[string]int64{}
+	}
+
 	// rows arrive grouped by user, newest restock first (see the SQL ORDER BY).
-	// Walk them into one job per user, capping each user's list to the 5 most
+	// Walk them into one job per user, capping each user's list to the most
 	// recently restocked items.
 	enqueued := 0
 	i := 0
@@ -167,7 +179,7 @@ func (r WishlistBackInReader) Run(ctx context.Context, now time.Time) (int, erro
 		}
 		var recos []domain.WishlistBackInItem
 		if companion.ID != "" {
-			recos, err = r.store.WishlistBackInRecommendations(ctx, user.ID, companion.ID)
+			recos, err = r.store.WishlistBackInRecommendations(ctx, user.ID, companion.ID, scores)
 			if err != nil {
 				log.Printf("wishlist back in: reco lookup failed for user %s, sending without cross-sell: %v", user.ID, err)
 				recos = nil

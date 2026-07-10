@@ -210,6 +210,85 @@ func TestWishlistBackInCompanionSurvivesNullPrices(t *testing.T) {
 	}
 }
 
+// The reco fast path is series-index-driven and does NOT aggregate popularity
+// (that is loaded once via the scores file and applied in Go); the fallback scans
+// the category and still ranks in SQL. Both keep the buyability filters/exclusions.
+func TestWishlistBackInRecoIsSeriesDrivenWithCategoryFallback(t *testing.T) {
+	loader := NewLoader("../../data/sql")
+	series, err := loader.Read("wishlist_back_in_reco")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Lightweight: series-index-driven, id + recency tiebreak only. No image lookup,
+	// no display joins, no aggregate, no LIMIT — the reader ranks against the loaded
+	// popularity map and hydrates only the winners.
+	for _, want := range []string{
+		"JOIN item_products ip ON ip.series_id = target.series_id",
+		"target.series_id > 0",
+		"AS raw_updated_at",
+	} {
+		if !strings.Contains(series, want) {
+			t.Fatalf("series candidate query must contain %q", want)
+		}
+	}
+	for _, forbidden := range []string{"INTERVAL 14 DAY", "ip.category_id = target.category_id", "kyoucdn.id", "LIMIT"} {
+		if strings.Contains(series, forbidden) {
+			t.Fatalf("series candidate query must not contain %q (it is bare ids; images/popularity/trim come later)", forbidden)
+		}
+	}
+
+	// Hydrate returns the full display columns for the ranked ids via an injected
+	// IN list.
+	hydrate, err := loader.Read("wishlist_back_in_reco_hydrate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"/*IDS*/", "image_url", "discount_price"} {
+		if !strings.Contains(hydrate, want) {
+			t.Fatalf("hydrate query must contain %q", want)
+		}
+	}
+
+	category, err := loader.Read("wishlist_back_in_reco_category")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"target.category_id IS NOT NULL",
+		"ip.category_id = target.category_id",
+		"INTERVAL 14 DAY", // the rare fallback still ranks by popularity in SQL
+		"LIMIT 6",
+	} {
+		if !strings.Contains(category, want) {
+			t.Fatalf("category fallback must contain %q", want)
+		}
+	}
+
+	// Buyability + exclusion invariants shared by both reco files.
+	for _, q := range []string{series, category} {
+		for _, want := range []string{"i.status = 'ready'", "i.is_available = 1", "i.stock > 0", "NOT EXISTS"} {
+			if !strings.Contains(q, want) {
+				t.Fatalf("reco query missing %q", want)
+			}
+		}
+	}
+
+	// The once-per-run popularity source: same 14-day weighted score as the fallback.
+	scores, err := loader.Read("wishlist_back_in_reco_scores")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"INTERVAL 14 DAY",
+		"WHEN 'view' THEN 1 WHEN 'wishlist' THEN 3 WHEN 'cart' THEN 5 WHEN 'bought' THEN 10",
+		"GROUP BY uia.item_id",
+	} {
+		if !strings.Contains(scores, want) {
+			t.Fatalf("reco scores query missing %q", want)
+		}
+	}
+}
+
 // The two campaigns are partitioned by event type. A conversion sends the item to
 // po-ready; a 0->>0 restock keeps it here. The gate below is what makes that
 // deterministic — without it the winner is whichever cron happens to run first.

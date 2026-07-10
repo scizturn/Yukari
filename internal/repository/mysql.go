@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"sort"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -28,7 +30,7 @@ func OpenMySQLStore(dsn string, loader sqlfiles.Loader) (*MySQLStore, error) {
 }
 
 func NewMySQLStore(db *sql.DB, loader sqlfiles.Loader) (*MySQLStore, error) {
-	names := []string{"birthday_users", "wishlist_items", "wishlist_items_winback", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill", "winback_users", "winback_fill_items", "wishlist_back_in_user_items", "wishlist_back_in_companion", "wishlist_back_in_reco", "wishlist_back_in_forced_items", "po_ready_user_items", "po_ready_forced_items"}
+	names := []string{"birthday_users", "wishlist_items", "wishlist_items_winback", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill", "winback_users", "winback_fill_items", "wishlist_back_in_user_items", "wishlist_back_in_companion", "wishlist_back_in_reco", "wishlist_back_in_reco_category", "wishlist_back_in_reco_scores", "wishlist_back_in_reco_hydrate", "wishlist_back_in_forced_items", "po_ready_user_items", "po_ready_forced_items"}
 	queries := make(map[string]string, len(names))
 	for _, name := range names {
 		query, err := loader.Read(name)
@@ -355,8 +357,169 @@ func (s *MySQLStore) WishlistBackInCompanion(ctx context.Context, userID string)
 	return item, err
 }
 
-func (s *MySQLStore) WishlistBackInRecommendations(ctx context.Context, userID, anchorItemID string) ([]domain.WishlistBackInItem, error) {
+// wishlistBackInRecoTarget is the size the cross-sell grid needs; it mirrors the
+// reader's wishlistBackInRecoCount. The series query fills it on the fast path; only
+// when the series comes up short does the slow category fallback run to top it up.
+const wishlistBackInRecoTarget = 6
+
+// WishlistBackInPopularityScores loads the 14-day "Most Popular" score per item
+// once per run (wishlist_back_in_reco_scores.sql). The reader passes the map into
+// every WishlistBackInRecommendations call so the series query does not re-aggregate
+// user_item_actions per user.
+func (s *MySQLStore) WishlistBackInPopularityScores(ctx context.Context) (map[string]int64, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["wishlist_back_in_reco_scores"])
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	scores := make(map[string]int64)
+	for rows.Next() {
+		var id string
+		var score int64
+		if err := rows.Scan(&id, &score); err != nil {
+			return nil, err
+		}
+		scores[id] = score
+	}
+	return scores, rows.Err()
+}
+
+// wishlistBackInCandidate is a bare series candidate: just its id and the recency
+// tiebreak. Full display columns are hydrated later for only the ranked winners.
+type wishlistBackInCandidate struct {
+	id        string
+	updatedAt time.Time
+}
+
+func (s *MySQLStore) WishlistBackInRecommendations(ctx context.Context, userID, anchorItemID string, scores map[string]int64) ([]domain.WishlistBackInItem, error) {
+	// Fast path: pull bare same-series candidate ids (cheap even for huge series),
+	// rank them in Go by the prebuilt popularity map (highest score first, newest as
+	// tiebreak — matching /search), then hydrate only the top few.
+	cands, err := s.wishlistBackInSeriesCandidates(ctx, anchorItemID, userID)
+	if err != nil {
+		return nil, err
+	}
+	rankedIDs := rankWishlistBackInCandidates(cands, scores, wishlistBackInRecoTarget)
+	items, err := s.wishlistBackInHydrate(ctx, rankedIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) >= wishlistBackInRecoTarget {
+		return items, nil
+	}
+
+	// Series came up short (small or absent series). Top up from the same category.
+	// That query scans the items table, so it only runs for the minority of anchors
+	// that need it, and it hydrates + ranks by popularity itself. Dedupe by item id —
+	// an item can match both series and category.
+	catItems, err := s.wishlistBackInRecoQuery(ctx, "wishlist_back_in_reco_category", anchorItemID, userID)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(items))
+	for _, it := range items {
+		seen[it.ID] = struct{}{}
+	}
+	for _, it := range catItems {
+		if len(items) >= wishlistBackInRecoTarget {
+			break
+		}
+		if _, dup := seen[it.ID]; dup {
+			continue
+		}
+		seen[it.ID] = struct{}{}
+		items = append(items, it)
+	}
+	return items, nil
+}
+
+// rankWishlistBackInCandidates orders candidates by popularity score (desc), then by
+// recency (desc) as the tiebreak, and returns the top `limit` item ids. This
+// reproduces the old SQL `ORDER BY search_score DESC, updated_at DESC` now that
+// scoring is done against the once-loaded map instead of a per-query aggregate.
+func rankWishlistBackInCandidates(cands []wishlistBackInCandidate, scores map[string]int64, limit int) []string {
+	sort.SliceStable(cands, func(a, b int) bool {
+		sa, sb := scores[cands[a].id], scores[cands[b].id]
+		if sa != sb {
+			return sa > sb
+		}
+		return cands[a].updatedAt.After(cands[b].updatedAt)
+	})
+	if len(cands) > limit {
+		cands = cands[:limit]
+	}
+	ids := make([]string, len(cands))
+	for i, c := range cands {
+		ids[i] = c.id
+	}
+	return ids
+}
+
+func (s *MySQLStore) wishlistBackInSeriesCandidates(ctx context.Context, anchorItemID, userID string) ([]wishlistBackInCandidate, error) {
 	rows, err := s.db.QueryContext(ctx, s.queries["wishlist_back_in_reco"], anchorItemID, userID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var cands []wishlistBackInCandidate
+	for rows.Next() {
+		var c wishlistBackInCandidate
+		if err := rows.Scan(&c.id, &c.updatedAt); err != nil {
+			return nil, err
+		}
+		cands = append(cands, c)
+	}
+	return cands, rows.Err()
+}
+
+// wishlistBackInHydrate fetches full display columns for the ranked ids and returns
+// them IN THAT ORDER (SQL IN does not preserve order, so we reindex).
+func (s *MySQLStore) wishlistBackInHydrate(ctx context.Context, ids []string) ([]domain.WishlistBackInItem, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	// ReplaceAll (not Replace, 1): the token must not survive anywhere, or a stray
+	// `/*IDS*/` would parse as an empty comment and break the IN list.
+	query := strings.ReplaceAll(s.queries["wishlist_back_in_reco_hydrate"], "/*IDS*/", placeholders)
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	byID := make(map[string]domain.WishlistBackInItem, len(ids))
+	for rows.Next() {
+		var item domain.WishlistBackInItem
+		if err := rows.Scan(
+			&item.ID, &item.Name, &item.URL, &item.ImageURL, &item.Price, &item.Status,
+			&item.Manufacturer, &item.SeriesName, &item.CategoryName, &item.RestockedAt,
+			&item.DiscountPrice, &item.DownPayment,
+		); err != nil {
+			return nil, err
+		}
+		byID[item.ID] = item
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	items := make([]domain.WishlistBackInItem, 0, len(ids))
+	for _, id := range ids {
+		if it, ok := byID[id]; ok {
+			items = append(items, it)
+		}
+	}
+	return items, nil
+}
+
+func (s *MySQLStore) wishlistBackInRecoQuery(ctx context.Context, name, anchorItemID, userID string) ([]domain.WishlistBackInItem, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries[name], anchorItemID, userID, userID)
 	if err != nil {
 		return nil, err
 	}

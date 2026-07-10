@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 
@@ -45,9 +46,18 @@ func TestWishlistBackInBuildsOneJobPerUserWithTheirItems(t *testing.T) {
 	if count != 2 || len(queue.jobs) != 2 {
 		t.Fatalf("expected two jobs, count=%d jobs=%d", count, len(queue.jobs))
 	}
-	first := queue.jobs[0]
-	if first.UserID != "1" || len(first.Items) != 2 || first.Items[0].ID != "101" || first.Items[1].ID != "102" {
-		t.Fatalf("unexpected first job items: %#v", first)
+	// Jobs come back in whatever order the worker pool finished, so index by user.
+	byUser := map[string]domain.WishlistBackInJob{}
+	for _, job := range queue.jobs {
+		byUser[job.UserID] = job
+	}
+
+	first, ok := byUser["1"]
+	if !ok {
+		t.Fatal("expected a job for userA")
+	}
+	if len(first.Items) != 2 || first.Items[0].ID != "101" || first.Items[1].ID != "102" {
+		t.Fatalf("unexpected userA job items: %#v", first)
 	}
 	if first.CompanionItem.ID != "202" {
 		t.Fatalf("expected companion on hero item, got %#v", first.CompanionItem)
@@ -55,22 +65,22 @@ func TestWishlistBackInBuildsOneJobPerUserWithTheirItems(t *testing.T) {
 	if len(first.RecoItems) != 6 {
 		t.Fatalf("expected 6 reco items when a full set is available, got %d", len(first.RecoItems))
 	}
-	if first.VoucherCode == "" {
-		t.Fatal("expected voucher in job")
-	}
 	// userA's items are GP 50 and 40 -> lowest clears 35 -> 8%. userB's lone item
 	// is GP 30 -> 6%. The percent on the job must match the voucher that was minted.
 	if first.VoucherDiscountPercent != 8 || first.VoucherCode != "WBI8-1" {
 		t.Fatalf("expected 8%% tier for userA, got %d%% code=%s", first.VoucherDiscountPercent, first.VoucherCode)
 	}
-	if second := queue.jobs[1]; second.VoucherDiscountPercent != 6 || second.VoucherCode != "WBI6-2" {
-		t.Fatalf("expected 6%% tier for userB, got %d%% code=%s", second.VoucherDiscountPercent, second.VoucherCode)
+	second, ok := byUser["2"]
+	if !ok {
+		t.Fatal("expected a job for userB")
 	}
-	if len(store.companionUserIDs) != 2 || store.companionUserIDs[0] != "1" || store.companionUserIDs[1] != "2" {
+	if len(second.Items) != 1 || second.VoucherDiscountPercent != 6 || second.VoucherCode != "WBI6-2" {
+		t.Fatalf("expected userB's lone item at 6%%, got %#v", second)
+	}
+	ids := append([]string(nil), store.companionUserIDs...)
+	sort.Strings(ids)
+	if len(ids) != 2 || ids[0] != "1" || ids[1] != "2" {
 		t.Fatalf("companion should key off each user (not the wishlist item), got %v", store.companionUserIDs)
-	}
-	if second := queue.jobs[1]; second.UserID != "2" || len(second.Items) != 1 {
-		t.Fatalf("unexpected second job: %#v", second)
 	}
 }
 
@@ -139,7 +149,11 @@ func (s *fakeWishlistBackInStore) WishlistBackInCompanion(_ context.Context, use
 	return s.companion, nil
 }
 
-func (s *fakeWishlistBackInStore) WishlistBackInRecommendations(context.Context, string, string) ([]domain.WishlistBackInItem, error) {
+func (s *fakeWishlistBackInStore) WishlistBackInPopularityScores(context.Context) (map[string]int64, error) {
+	return map[string]int64{}, nil
+}
+
+func (s *fakeWishlistBackInStore) WishlistBackInRecommendations(context.Context, string, string, map[string]int64) ([]domain.WishlistBackInItem, error) {
 	return s.recos, nil
 }
 
@@ -303,3 +317,4 @@ func TestWishlistBackInStillSendsWhenCompanionLookupFails(t *testing.T) {
 		}
 	}
 }
+

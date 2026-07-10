@@ -95,7 +95,11 @@ func main() {
 	}
 	var recos []domain.WishlistBackInItem
 	if companion.ID != "" {
-		recos, err = store.WishlistBackInRecommendations(ctx, user.ID, companion.ID)
+		scores, err := store.WishlistBackInPopularityScores(ctx)
+		if err != nil {
+			log.Fatal(err)
+		}
+		recos, err = store.WishlistBackInRecommendations(ctx, user.ID, companion.ID, scores)
 		if err != nil {
 			log.Fatal(err)
 		}
