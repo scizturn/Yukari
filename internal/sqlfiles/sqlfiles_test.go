@@ -186,7 +186,7 @@ func TestWishlistBackInQueriesEnforceCampaignRules(t *testing.T) {
 		"i.status IN ('ready', 'PO')",
 		"ip.po_deadline IS NULL OR ip.po_deadline >= CURRENT_DATE",
 		"i.stock > 0",
-		"u.email_verified_at IS NOT NULL",
+		"u.email IS NOT NULL AND u.email <> ''",
 		"edl.feature IN ('wishlist_back_in', 'po_ready')",
 		"JSON_CONTAINS",
 		"INTERVAL 90 DAY",
@@ -248,7 +248,7 @@ func TestPoReadyQueryEnforcesCampaignRules(t *testing.T) {
 		"i.status = 'ready'",
 		"i.stock > 0",
 		"i.is_available = 1",
-		"u.email_verified_at IS NOT NULL",
+		"u.email IS NOT NULL AND u.email <> ''",
 		// Dedup spans both item-news features, or one item earns two emails.
 		"edl.feature IN ('po_ready', 'wishlist_back_in')",
 		"JSON_CONTAINS",

@@ -11,7 +11,7 @@ SELECT DISTINCT
   CAST(u.user_id AS CHAR)      AS user_id,
   u.name,
   u.email,
-  u.email_verified_at IS NOT NULL AS is_active
+  TRUE AS is_active
 FROM users u
 JOIN wishlists w  ON w.user_id  = u.user_id
 JOIN items     i  ON i.item_id  = w.item_id
@@ -25,7 +25,7 @@ WHERE i.discount_start_date = DATE(?)
   AND COALESCE(i.isAdult, 0) = 0
   AND i.discount_price > 0
   AND i.discount_price < ip.price
-  AND u.email_verified_at IS NOT NULL
+  AND u.email IS NOT NULL AND u.email <> ''
   AND NOT EXISTS (
     SELECT 1
     FROM email_delivery_logs edl

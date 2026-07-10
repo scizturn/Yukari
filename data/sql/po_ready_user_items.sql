@@ -47,7 +47,7 @@ SELECT STRAIGHT_JOIN
   CAST(u.user_id AS CHAR)                                         AS user_id,
   u.name                                                          AS user_name,
   u.email                                                         AS user_email,
-  u.email_verified_at IS NOT NULL                                 AS is_active,
+  TRUE                                                            AS is_active,
   CAST(i.item_id AS CHAR)                                         AS id,
   i.name,
   CONCAT('https://kyou.id/items/', i.item_id, '/')               AS url,
@@ -79,7 +79,6 @@ WHERE sl.description IN ('convert po by excel', 'convert po manual', 'reconvert 
   AND i.stock > 0
   AND i.is_available = 1
   AND COALESCE(i.isAdult, 0) = 0
-  AND u.email_verified_at IS NOT NULL
   AND u.email IS NOT NULL AND u.email <> ''
   AND NOT EXISTS (
     SELECT 1
@@ -90,5 +89,5 @@ WHERE sl.description IN ('convert po by excel', 'convert po manual', 'reconvert 
       AND edl.created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
       AND JSON_CONTAINS(JSON_EXTRACT(edl.metadata, '$.item_ids'), JSON_QUOTE(CAST(i.item_id AS CHAR)))
   )
-GROUP BY u.user_id, u.name, u.email, u.email_verified_at, i.item_id, i.name, img.path, ip.price
+GROUP BY u.user_id, u.name, u.email, i.item_id, i.name, img.path, ip.price
 ORDER BY u.user_id, ready_at DESC, i.item_id

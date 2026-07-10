@@ -3,10 +3,9 @@ SELECT DISTINCT
   u.name,
   u.email,
   u.created_at,
-  u.email_verified_at IS NOT NULL AS is_active
+  TRUE AS is_active
 FROM users u
 WHERE DATE(u.last_login) = DATE_SUB(DATE(?), INTERVAL 90 DAY)
-  AND u.email_verified_at IS NOT NULL
   AND u.email IS NOT NULL AND u.email <> ''
   AND (
     SELECT COALESCE(SUM(o.total_price + o.remaining), 0)

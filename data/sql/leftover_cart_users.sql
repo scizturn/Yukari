@@ -3,7 +3,7 @@ SELECT
   u.name,
   u.email,
   u.birthdate,
-  u.email_verified_at IS NOT NULL AS is_active
+  TRUE AS is_active
 FROM users u
 JOIN (
   SELECT c.user_id, MAX(ci.created_at) AS last_cart_at
@@ -16,8 +16,7 @@ LEFT JOIN (
   FROM orders
   GROUP BY user_id
 ) oa ON oa.user_id = u.user_id
-WHERE u.email_verified_at IS NOT NULL
-  AND u.email IS NOT NULL
+WHERE u.email IS NOT NULL
   AND u.email <> ''
   AND EXISTS (
     SELECT 1

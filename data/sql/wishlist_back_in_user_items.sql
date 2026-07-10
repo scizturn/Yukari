@@ -39,7 +39,7 @@ SELECT STRAIGHT_JOIN
   CAST(u.user_id AS CHAR)                                         AS user_id,
   u.name                                                          AS user_name,
   u.email                                                         AS user_email,
-  u.email_verified_at IS NOT NULL                                 AS is_active,
+  TRUE                                                            AS is_active,
   CAST(i.item_id AS CHAR)                                         AS id,
   i.name,
   CONCAT('https://kyou.id/items/', i.item_id, '/')               AS url,
@@ -96,7 +96,6 @@ WHERE sl.is_restock = 1
   AND i.stock > 0
   AND i.is_available = 1
   AND COALESCE(i.isAdult, 0) = 0
-  AND u.email_verified_at IS NOT NULL
   AND u.email IS NOT NULL AND u.email <> ''
   -- EVENT GATE: an item whose PO stock was just converted belongs to po-ready,
   -- not here. Some items trip both triggers (a conversion that also ended a

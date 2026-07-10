@@ -3,11 +3,10 @@ SELECT
   u.name,
   u.email,
   u.birthdate,
-  u.email_verified_at IS NOT NULL AS is_active,
+  TRUE AS is_active,
   TIMESTAMPDIFF(YEAR, u.created_at, NOW()) AS years
 FROM users u
 WHERE DATE_FORMAT(u.created_at, '%m-%d') = ?
-  AND u.email_verified_at IS NOT NULL
   AND u.email IS NOT NULL
   AND u.email <> ''
   AND TIMESTAMPDIFF(YEAR, u.created_at, NOW()) > 0
