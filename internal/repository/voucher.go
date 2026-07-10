@@ -161,7 +161,7 @@ INSERT INTO vouchers (
   updated_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NOW(), NOW())`,
 		code,
-		c.voucherName(),
+		c.voucherNameWithUser(user),
 		stringPtrValue(c.cfg.Description),
 		c.cfg.Type,
 		c.cfg.Amount.Value,
@@ -546,7 +546,7 @@ INSERT INTO vouchers (
   updated_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NOW(), NOW())`,
 		code,
-		c.anniversaryVoucherName(user),
+		c.voucherNameWithUser(user),
 		stringPtrValue(c.cfg.Description),
 		c.cfg.Type,
 		c.cfg.Amount.Value,
@@ -835,7 +835,10 @@ func (c *MySQLVoucherCreator) voucherName() string {
 	return c.cfg.Name
 }
 
-func (c *MySQLVoucherCreator) anniversaryVoucherName(user domain.User) string {
+// voucherNameWithUser suffixes the configured name with the recipient's name,
+// so the voucher is identifiable in the admin list. Birthday and anniversary
+// use it; winback and wishlist-back-in still use the bare voucherName.
+func (c *MySQLVoucherCreator) voucherNameWithUser(user domain.User) string {
 	name := strings.TrimSpace(c.cfg.Name)
 	if name == "" {
 		name = "ANNIVERSARY"

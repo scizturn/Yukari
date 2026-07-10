@@ -112,7 +112,7 @@ func TestAnniversaryVoucherNameUsesConfigAndUserName(t *testing.T) {
 		cfg: BirthdayVoucherConfig{Name: "🥳 Memberversarry!"}.withDefaults(),
 	}
 
-	got := creator.anniversaryVoucherName(domain.User{Name: "Tegar"})
+	got := creator.voucherNameWithUser(domain.User{Name: "Tegar"})
 	if got != "🥳 Memberversarry! Tegar" {
 		t.Fatalf("unexpected anniversary voucher name: %q", got)
 	}
