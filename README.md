@@ -2,7 +2,7 @@
 
 Email campaign reader untuk Kyou.id, termasuk discounted wishlist.
 
-Yukari membaca Hanayo/Kyou MySQL menggunakan SQL files dari `data/sql`, membangun job payload lengkap, membuat voucher alias per-user, dan mendorong job ke Redis untuk Makoto kirimkan. Penerima harus memiliki email non-kosong dan `email_verified_at IS NOT NULL`.
+Yukari membaca Hanayo/Kyou MySQL menggunakan SQL files dari `data/sql`, membangun job payload lengkap, membuat voucher alias per-user, dan mendorong job ke Redis untuk Makoto kirimkan. Penerima cuma perlu punya email non-kosong — `email_verified_at` **tidak** lagi disyaratkan (lihat commit `932cff2`), jadi ~5.500 user yang alamatnya belum pernah dikonfirmasi ikut kena kirim.
 
 ## Flow
 
@@ -101,7 +101,7 @@ YUKARI_WISHLIST_BACK_IN_VOUCHER_CONFIG=data/vouchers/wishlist_back_in.json
 
 User production dipilih hanya jika:
 
-- mempunyai verified email;
+- mempunyai email non-kosong;
 - mempunyai item wishlist dengan `discount_start_date = kemarin` di timezone `YUKARI_TIMEZONE`;
 - diskon belum berakhir, nama diskon terisi, stok lebih dari 0, item tersedia, dan bukan item adult;
 - tidak memiliki audit `queued`, `sending`, atau `sent` untuk feature `discounted_wishlist` dalam 7 hari terakhir.
@@ -150,7 +150,7 @@ Kampanye **user-centric**: satu email per user berisi item wishlist **milik user
 
 User + item dipilih hanya jika:
 
-- user punya **verified email**;
+- user punya **email non-kosong**;
 - item ada di **wishlist user**, dan punya event restock 0→>0 (di atas) **dalam window ~21 hari** (carry-over);
 - item sekarang `stock>0`, `is_available=1`, status `ready`/`PO` (PO deadline masih buka), non-adult;
 - user **belum** dikirimi item tersebut dalam **90 hari terakhir** (dedup per `(user, item)` via `email_delivery_logs.metadata.item_ids`, cooldown 90 hari — restock lagi setelah >90 hari boleh re-notify).
@@ -204,10 +204,18 @@ go run ./cmd/yukari wishlist-back-in
 
 Yukari membuat voucher alias per-user sebelum enqueue. Kode voucher bersifat deterministik (HMAC dari `user_id + tahun + secret`), sehingga retry dalam tahun yang sama menghasilkan kode yang sama.
 
-- **Birthday**: prefix default, durasi dari `data/vouchers/birthday.json`
-- **Anniversary**: prefix `ANV`, durasi hardcode 14 hari, config dari `data/vouchers/anniversary.json`
+| Campaign | Prefix | Nama voucher | Durasi | Config |
+|---|---|---|---|---|
+| Birthday | tanpa prefix | `🎂 OtaOme! <nama user>` | dari config (14 hari) | `data/vouchers/birthday.json` |
+| Anniversary | `ANV` | `🥳 KyouVersary! <nama user>` | hardcode 14 hari (`voucher.go:525`) | `data/vouchers/anniversary.json` |
+| Winback | `WB` | `🏠 Okaerinasai!` | dari config (14 hari) | `data/vouchers/winback.json` |
+| Wishlist back-in | `WBI8-` / `WBI6-` | `Wishlist Back In 🎉` | dari config | `data/vouchers/wishlist_back_in{,_low}.json` |
 
-Kalau voucher tahun itu sudah ada → Yukari skip user (tidak enqueue duplikat).
+Birthday dan anniversary menempelkan nama pelanggan di belakang nama voucher (`voucherNameWithUser`); winback dan wishlist back-in tidak.
+
+⚠️ **Tabrakan prefix.** Kode winback diawali `WB`, wishlist back-in `WBI`. Alfabet base32 (`A–Z2–7`) memuat huruf `I`, jadi ~1 dari 32 kode winback juga diawali `WBI`. Contoh nyata di prod: `WBI3M65PSIYEH6MX` itu voucher **winback**. Pencarian yang aman: `WBI8-` atau `WBI6-`, karena tanda hubung nggak pernah muncul di bagian acak kode.
+
+Kalau voucher tahun itu sudah ada → Yukari skip user (tidak enqueue duplikat). Wishlist back-in beda: kodenya per **minggu ISO**, dan voucher hidup yang belum dipakai akan di-reuse (scope `item_id`-nya dilebarkan) alih-alih mencetak yang baru.
 
 DB user yang dipakai (`OLD_DATABASE_*`) harus punya akses write ke `vouchers`, `voucher_pricing_aliases`, dan `voucher_rules`.
 
@@ -239,11 +247,13 @@ Wishlist back-in **hanya jalan hari Jumat** (reader self-gating). Set cron di ha
 
 ```text
 Command: yukari wishlist-back-in
-Frequency: 0 13 * * 5     # Jumat 13:00 UTC = Jumat 20:00 WIB
+Frequency: 0 9 * * 5      # Jumat 09:00 UTC = Jumat 16:00 WIB
 Timeout: 300
 ```
 
-⚠️ **Jebakan UTC↔WIB.** Reader ngecek "hari Jumat" pakai `YUKARI_TIMEZONE` (Asia/Jakarta), sedangkan cron Coolify jalan di UTC. Pastikan waktunya tetap **Jumat di WIB** — mis. `0 13 * * 5` (Jumat 20:00 WIB) aman, tapi `0 20 * * 5` = Sabtu 03:00 WIB → reader lihat Sabtu → **no-op, kampanye minggu itu ke-skip** (bukan cuma telat: window-nya geser). Alternatif aman: cron harian `0 13 * * *` — reader no-op 6 hari, cuma Jumat yang kerja.
+⚠️ **Jebakan UTC↔WIB.** Reader ngecek "hari Jumat" pakai `YUKARI_TIMEZONE` (Asia/Jakarta), sedangkan cron Coolify jalan di UTC. Pastikan waktunya tetap **Jumat di WIB** — rentang amannya Kamis 17:00 UTC s/d Jumat 16:59 UTC. `0 9 * * 5` (Jumat 16:00 WIB) aman, tapi `0 20 * * 5` = Sabtu 03:00 WIB → reader lihat Sabtu → **no-op, kampanye minggu itu ke-skip** (bukan cuma telat: window-nya geser). Alternatif aman: cron harian `0 9 * * *` — reader no-op 6 hari, cuma Jumat yang kerja.
+
+Jam eksekusinya sendiri nggak ngaruh ke isi email: window-nya dipotong di tengah malam WIB hari itu (`cutoff`), mundur 21 hari. Restock yang terjadi Jumat pagi baru kebagian Jumat berikutnya.
 
 **Seed/test send via Coolify (forcejob).** Buat kirim uji ke satu user tanpa nunggu Jumat, bikin task terpisah:
 
