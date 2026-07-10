@@ -12,18 +12,26 @@ import (
 )
 
 // wishlistBackInMaxItems caps how many restocked items one user's email lists.
-const wishlistBackInMaxItems = 5
+// Measured over the 12 Fridays to 2026-07-10 (23,175 emails): 19,444 listed a
+// single item and the 99.9th percentile was 9, so 10 costs almost nobody extra
+// length while cutting the truncated emails from 126 (cap 5) to 21.
+const wishlistBackInMaxItems = 10
 
-// wishlistBackInWindow is how far back a restock still counts as a pending
-// carry-over item. It is wider than one week (21 days ≈ 3 Fridays) so items that
-// overflowed a user's 5-item cap in an earlier week remain candidates and fire on
-// a later Friday — the queue behaviour ("continue to the next item id that has
-// not yet fired"). The per-(user,item) 90-day dedup drains the queue: an item
-// fires once, then is suppressed, letting the next un-fired item through. 21 days
-// keeps the weekly query fast (~1.5s) and the first-run blast bounded; an
-// un-fired item that never wins a slot ages out after 3 weeks. Widen it if longer
-// carry-over is wanted (cost grows: 30d ≈ 7s, 90d ≈ 17s).
-const wishlistBackInWindow = 21 * 24 * time.Hour
+// wishlistBackInWindow is how far back a restock still counts. It tiles exactly
+// one week of the Friday cron, so nothing is announced twice and nothing older
+// than seven days is announced as news.
+//
+// It used to be 21 days, on the theory that the extra fortnight let items that
+// overflowed the per-user cap fire on a later Friday. It did not: selection is
+// newest-restock-first, so an overflowed item loses again to every fresh restock
+// and simply ages out at day 21. Measured over the 12 Fridays to 2026-07-10, the
+// cap truncated 21 of 23,175 emails — a real carry-over queue would need to
+// persist "not yet announced" somewhere, which nothing does. Overflow is dropped,
+// exactly as po-ready drops its own tail.
+//
+// Cost also argued for narrowing: 7d ≈ 1.4s, 21d ≈ 2.3s, 90d ≈ 15.7s, and a 90d
+// window would blast 11,924 users with three-month-old restocks.
+const wishlistBackInWindow = 7 * 24 * time.Hour
 
 // wishlistBackInRecoCount is the exact number of cross-sell recommendations the
 // "Gas, nemenin yang udah kamu beli" section needs; fewer -> the section is hidden.
@@ -98,6 +106,11 @@ type WishlistBackInReader struct {
 	audit     WishlistBackInAuditLogger
 	queueName string
 	actionURL string
+
+	// Window overrides wishlistBackInWindow when non-zero. Restocks older than the
+	// window are dropped, not deferred — next week's window starts a week later
+	// too — so widening it re-announces old news rather than catching up.
+	Window time.Duration
 }
 
 func NewWishlistBackIn(store WishlistBackInStore, queue WishlistBackInQueue, vouchers WishlistBackInVoucherCreator, auditLogger WishlistBackInAuditLogger, queueName, actionURL string) WishlistBackInReader {
@@ -109,8 +122,12 @@ func (r WishlistBackInReader) Run(ctx context.Context, now time.Time) (int, erro
 		return 0, nil
 	}
 
+	window := r.Window
+	if window <= 0 {
+		window = wishlistBackInWindow
+	}
 	cutoff := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	startAt := cutoff.Add(-wishlistBackInWindow)
+	startAt := cutoff.Add(-window)
 
 	rows, err := r.store.WishlistBackInUserItems(ctx, startAt, cutoff)
 	if err != nil {

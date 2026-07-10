@@ -27,6 +27,7 @@ type Config struct {
 	WinbackQueueName                string
 	WinbackVoucherConfigPath        string
 	WishlistBackInQueueName         string
+	WishlistBackInWindowDays        int
 	PoReadyQueueName                string
 	// Wishlist-back-in mints one voucher per user, from the config for the GP tier
 	// the reader picked: the 8% tier (GP >= 35) or the 6% tier (GP >= 25).
@@ -54,6 +55,7 @@ func Load() Config {
 		WinbackQueueName:                env("YUKARI_WINBACK_QUEUE_NAME", "winback_email_jobs"),
 		WinbackVoucherConfigPath:        env("YUKARI_WINBACK_VOUCHER_CONFIG", "data/vouchers/winback.json"),
 		WishlistBackInQueueName:         env("YUKARI_WISHLIST_BACK_IN_QUEUE_NAME", "wishlist_back_in_email_jobs"),
+		WishlistBackInWindowDays:        envInt("YUKARI_WISHLIST_BACK_IN_WINDOW_DAYS", 7),
 		PoReadyQueueName:                env("YUKARI_PO_READY_QUEUE_NAME", "po_ready_email_jobs"),
 		WishlistBackInVoucherConfigPath:    env("YUKARI_WISHLIST_BACK_IN_VOUCHER_CONFIG", "data/vouchers/wishlist_back_in.json"),
 		WishlistBackInLowVoucherConfigPath: env("YUKARI_WISHLIST_BACK_IN_LOW_VOUCHER_CONFIG", "data/vouchers/wishlist_back_in_low.json"),

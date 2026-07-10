@@ -73,11 +73,12 @@ func TestWishlistBackInBuildsOneJobPerUserWithTheirItems(t *testing.T) {
 	}
 }
 
-func TestWishlistBackInCapsItemsAtFive(t *testing.T) {
+func TestWishlistBackInCapsItemsAtTen(t *testing.T) {
 	now := time.Date(2026, 6, 19, 9, 0, 0, 0, time.UTC)
 	user := domain.User{ID: "9", Name: "Packrat", Email: "p@example.test", IsActive: true}
 	var rows []domain.WishlistBackInUserItem
-	for i := 0; i < 8; i++ {
+	// More than the cap: the tail is dropped, not carried over to a later Friday.
+	for i := 0; i < wishlistBackInMaxItems+3; i++ {
 		rows = append(rows, domain.WishlistBackInUserItem{User: user, Item: domain.WishlistBackInItem{ID: string(rune('a' + i))}})
 	}
 	store := &fakeWishlistBackInStore{rows: rows}
@@ -117,10 +118,14 @@ type fakeWishlistBackInStore struct {
 	recos            []domain.WishlistBackInItem
 	userItemsCalled  bool
 	companionUserIDs []string
+	gotStartAt       time.Time
+	gotEndAt         time.Time
 }
 
-func (s *fakeWishlistBackInStore) WishlistBackInUserItems(context.Context, time.Time, time.Time) ([]domain.WishlistBackInUserItem, error) {
+func (s *fakeWishlistBackInStore) WishlistBackInUserItems(_ context.Context, startAt, endAt time.Time) ([]domain.WishlistBackInUserItem, error) {
 	s.userItemsCalled = true
+	s.gotStartAt = startAt
+	s.gotEndAt = endAt
 	return s.rows, nil
 }
 
@@ -226,4 +231,41 @@ type fakeWishlistBackInVoucherCreator struct {
 func (f *fakeWishlistBackInVoucherCreator) CreateWishlistBackInVoucher(_ context.Context, user domain.User, _ time.Time, _ []string, discountPercent int) (domain.Voucher, error) {
 	f.tiers = append(f.tiers, discountPercent)
 	return domain.Voucher{ID: 1, Code: fmt.Sprintf("WBI%d-%s", discountPercent, user.ID)}, nil
+}
+
+func TestWishlistBackInWindowDefaultsToOneWeek(t *testing.T) {
+	store := &fakeWishlistBackInStore{}
+	friday := time.Date(2026, 7, 10, 16, 0, 0, 0, time.UTC)
+
+	if _, err := NewWishlistBackIn(store, &fakeWishlistBackInQueue{}, nil, nil, "queue", "").Run(context.Background(), friday); err != nil {
+		t.Fatal(err)
+	}
+
+	wantEnd := time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
+	if !store.gotEndAt.Equal(wantEnd) {
+		t.Fatalf("window ends at %s, want midnight %s", store.gotEndAt, wantEnd)
+	}
+	// One week exactly: the Friday cron tiles it, so nothing is announced twice
+	// and nothing older than seven days is announced as news.
+	if got := wantEnd.Sub(store.gotStartAt); got != 7*24*time.Hour {
+		t.Fatalf("default window is %s, want 7 days", got)
+	}
+}
+
+func TestWishlistBackInWindowOverrideWidensTheSweep(t *testing.T) {
+	store := &fakeWishlistBackInStore{}
+	friday := time.Date(2026, 7, 10, 16, 0, 0, 0, time.UTC)
+
+	r := NewWishlistBackIn(store, &fakeWishlistBackInQueue{}, nil, nil, "queue", "")
+	r.Window = 21 * 24 * time.Hour
+	if _, err := r.Run(context.Background(), friday); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := store.gotEndAt.Sub(store.gotStartAt); got != 21*24*time.Hour {
+		t.Fatalf("window is %s, want the 21-day override", got)
+	}
+	if want := time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC); !store.gotStartAt.Equal(want) {
+		t.Fatalf("window starts %s, want %s", store.gotStartAt, want)
+	}
 }

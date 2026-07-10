@@ -50,7 +50,13 @@ func runWishlistBackIn() {
 		defer auditLogger.Close()
 	}
 
-	count, err := reader.NewWishlistBackIn(wbiStore, redisQueue, voucherCreator, auditLogger, cfg.WishlistBackInQueueName, cfg.ActionURL).Run(ctx, now)
+	wbiReader := reader.NewWishlistBackIn(wbiStore, redisQueue, voucherCreator, auditLogger, cfg.WishlistBackInQueueName, cfg.ActionURL)
+	if days := cfg.WishlistBackInWindowDays; days > 0 {
+		wbiReader.Window = time.Duration(days) * 24 * time.Hour
+		log.Printf("wishlist back in detection window: %d day(s)", days)
+	}
+
+	count, err := wbiReader.Run(ctx, now)
 	if err != nil {
 		log.Fatalf("wishlist back in reader failed: %v", err)
 	}

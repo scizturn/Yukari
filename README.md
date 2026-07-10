@@ -91,9 +91,10 @@ YUKARI_ANNIVERSARY_VOUCHER_CONFIG=data/vouchers/anniversary.json
 # Discounted wishlist
 YUKARI_DISCOUNTED_WISHLIST_QUEUE_NAME=discounted_wishlist_email_jobs
 
-# Wishlist back-in (reader hanya jalan hari Jumat; window carry-over ~21 hari
-# dihitung otomatis dari tanggal run — tidak ada START_AT)
+# Wishlist back-in (reader hanya jalan hari Jumat; window 7 hari dihitung
+# otomatis dari tanggal run — tidak ada START_AT)
 YUKARI_WISHLIST_BACK_IN_QUEUE_NAME=wishlist_back_in_email_jobs
+YUKARI_WISHLIST_BACK_IN_WINDOW_DAYS=7
 YUKARI_WISHLIST_BACK_IN_VOUCHER_CONFIG=data/vouchers/wishlist_back_in.json
 ```
 
@@ -140,9 +141,11 @@ Release mass-send tetap menunggu checklist operasional Makoto: preference center
 
 Kampanye **user-centric**: satu email per user berisi item wishlist **milik user itu sendiri** yang baru **balik stok** minggu ini. Beda dari discounted-wishlist yang mulai dari diskon, ini mulai dari **event restock** di `stock_logs`.
 
-**Kapan jalan.** Reader self-gating: `go run ./cmd/yukari wishlist-back-in` hanya bekerja hari **Jumat** (hari lain langsung return 0). Window scan restock **~21 hari** (carry-over) dihitung otomatis dari tanggal run di `YUKARI_TIMEZONE`. Tidak ada `START_AT`.
+**Kapan jalan.** Reader self-gating: `go run ./cmd/yukari wishlist-back-in` hanya bekerja hari **Jumat** (hari lain langsung return 0). Window scan restock **7 hari** — persis satu putaran cron — dihitung otomatis dari tanggal run di `YUKARI_TIMEZONE`. Bisa ditimpa via `YUKARI_WISHLIST_BACK_IN_WINDOW_DAYS`. Tidak ada `START_AT`.
 
-**Carry-over.** Tiap user dibatasi maks 5 item/email. Kalau item yang restock lebih dari 5, sisanya **tidak hilang**: window 21 hari + dedup per-(user,item) bikin item yang belum ke-fire tetap jadi kandidat dan difire di Jumat berikutnya, sampai antriannya habis (atau item umur restock-nya lewat 21 hari). Contoh: 6 item balik → 5 difire Jumat ini, 1 sisanya Jumat depan.
+**Tidak ada carry-over.** Tiap user dibatasi maks **10 item/email**, urut restock terbaru. Kalau lebih dari 10, sisanya **dibuang** — sama seperti po-ready. Melebarkan window tidak menyelamatkan ekor itu: pemilihannya newest-first, jadi item yang kalah slot bakal kalah lagi minggu depan oleh restock yang lebih baru, lalu kedaluwarsa. Carry-over sungguhan butuh tabel "belum diumumkan", dan itu belum ada.
+
+Diukur di prod, 12 Jumat s/d 10 Jul 2026 (23.175 email): 19.444 email cuma berisi 1 item, p99,9 = 9 item, maksimum 31. Cap 10 memotong **21 email** (0,09%); cap 5 yang lama memotong 126 (0,54%).
 
 **"Balik stok" = event `stock_logs`** dengan `is_restock=1`, `type='increase'`, `description='Increased via Insert Stock (Adjusment)'`, dan JSON `before_all_stock=0 → after_all_stock>0`. Berlaku untuk item **`ready`** maupun **`PO`** yang slotnya reopen; PO di-guard `po_deadline IS NULL OR po_deadline >= CURRENT_DATE` supaya PO yang sudah tutup tidak ikut.
 
@@ -151,17 +154,17 @@ Kampanye **user-centric**: satu email per user berisi item wishlist **milik user
 User + item dipilih hanya jika:
 
 - user punya **email non-kosong**;
-- item ada di **wishlist user**, dan punya event restock 0→>0 (di atas) **dalam window ~21 hari** (carry-over);
+- item ada di **wishlist user**, dan punya event restock 0→>0 (di atas) **dalam window 7 hari**;
 - item sekarang `stock>0`, `is_available=1`, status `ready`/`PO` (PO deadline masih buka), non-adult;
 - user **belum** dikirimi item tersebut dalam **90 hari terakhir** (dedup per `(user, item)` via `email_delivery_logs.metadata.item_ids`, cooldown 90 hari — restock lagi setelah >90 hari boleh re-notify).
 
-Tiap user diberi **maksimum 5 item** per email, diurut **restock terbaru** dulu.
+Tiap user diberi **maksimum 10 item** per email, diurut **restock terbaru** dulu; sisanya dibuang.
 
 **Section "Gas, Nemenin Yang Udah Kamu Beli" (cross-sell).** Anchor = satu item yang **sudah dibeli** user, se-series/kategori dengan hero item (`wishlist_back_in_companion.sql`). Dari situ ditarik **6 item Most Popular Kyou** (`kyou_search_score` live 14 hari — cermin fill winback) di series/kategori yang sama (`wishlist_back_in_reco.sql`), **exclude** item yang sudah dibeli/di-wishlist, ready/in-stock/non-adult/non-admin/non-Wakeari. Section hanya tampil kalau ada anchor **dan** genap 6 rekomendasi; kalau kurang → hilang (N/A).
 
 **Harga & badge** mengikuti hanamaru persis: badge status (`ready`/`PO`/`LPO`/`BO`/Revive), harga diskon (harga diskon + coret asli, hanya kalau `discount_qty > 0` aktif) atau DP (`DP IDR <dp> / <full>` untuk PO), else harga polos. Dirender di Makoto.
 
-**PERF.** Query (`wishlist_back_in_user_items.sql`) memakai `STRAIGHT_JOIN` dengan `stock_logs` sebagai driving table supaya window memangkas lebih dulu — tanpa ini planner full-scan `items` (~215k row, 70s+). ~1.5s untuk window 21 hari, tanpa disk temp table (30d ≈ 7s, 90d ≈ 17s kalau window diperlebar).
+**PERF.** Query (`wishlist_back_in_user_items.sql`) memakai `STRAIGHT_JOIN` dengan `stock_logs` sebagai driving table supaya window memangkas lebih dulu — tanpa ini planner full-scan `items` (~215k row, 70s+). Diukur: 7d ≈ 1,4s, 21d ≈ 2,3s, 30d ≈ 5,6s, 60d ≈ 10,4s, 90d ≈ 15,7s.
 
 ## Wishlist Back-In Voucher
 
@@ -253,7 +256,9 @@ Timeout: 300
 
 ⚠️ **Jebakan UTC↔WIB.** Reader ngecek "hari Jumat" pakai `YUKARI_TIMEZONE` (Asia/Jakarta), sedangkan cron Coolify jalan di UTC. Pastikan waktunya tetap **Jumat di WIB** — rentang amannya Kamis 17:00 UTC s/d Jumat 16:59 UTC. `0 9 * * 5` (Jumat 16:00 WIB) aman, tapi `0 20 * * 5` = Sabtu 03:00 WIB → reader lihat Sabtu → **no-op, kampanye minggu itu ke-skip** (bukan cuma telat: window-nya geser). Alternatif aman: cron harian `0 9 * * *` — reader no-op 6 hari, cuma Jumat yang kerja.
 
-Jam eksekusinya sendiri nggak ngaruh ke isi email: window-nya dipotong di tengah malam WIB hari itu (`cutoff`), mundur 21 hari. Restock yang terjadi Jumat pagi baru kebagian Jumat berikutnya.
+Jam eksekusinya sendiri nggak ngaruh ke isi email: window-nya dipotong di tengah malam WIB hari itu (`cutoff`), mundur 7 hari. Restock yang terjadi Jumat pagi baru kebagian Jumat berikutnya.
+
+Window 7 hari tiling persis satu putaran cron, jadi kiriman perdana pun cuma memuat restock seminggu terakhir — nggak ada blast retroaktif. Diukur 10 Jul 2026: **1.854 user**. Kalau `YUKARI_WISHLIST_BACK_IN_WINDOW_DAYS` dilebarkan, itu bukan mengejar ketertinggalan, tapi mengumumkan ulang restock lama (21 hari = 2.598 user, 90 hari = 11.924 user).
 
 **Seed/test send via Coolify (forcejob).** Buat kirim uji ke satu user tanpa nunggu Jumat, bikin task terpisah:
 
