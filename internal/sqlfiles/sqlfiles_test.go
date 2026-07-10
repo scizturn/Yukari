@@ -197,6 +197,19 @@ func TestWishlistBackInQueriesEnforceCampaignRules(t *testing.T) {
 	}
 }
 
+// order_items.item_price is NULL on ~50k historical rows. Scanning it bare into an
+// int killed a whole Friday run with "converting NULL to int is unsupported", so
+// every scanned column of this query must survive a NULL.
+func TestWishlistBackInCompanionSurvivesNullPrices(t *testing.T) {
+	query, err := NewLoader("../../data/sql").Read("wishlist_back_in_companion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(query, "oi.item_price  ") || !strings.Contains(query, "COALESCE(oi.item_price") {
+		t.Fatal("expected companion query to COALESCE oi.item_price, which is NULL on ~50k rows")
+	}
+}
+
 // The two campaigns are partitioned by event type. A conversion sends the item to
 // po-ready; a 0->>0 restock keeps it here. The gate below is what makes that
 // deterministic — without it the winner is whichever cron happens to run first.

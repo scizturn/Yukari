@@ -9,7 +9,10 @@ SELECT
   i.name,
   CONCAT('https://kyou.id/items/', i.item_id, '/')               AS url,
   COALESCE(CONCAT('https://kyoucdn.id/', img.path, '.webp'), '') AS image_url,
-  oi.item_price                                                   AS price,
+  -- order_items.item_price is NULL on ~50k historical rows; a bare column here
+  -- crashed the whole Friday run on "converting NULL to int". Fall back to the
+  -- item's current catalogue price, then to 0 ("Cek harga").
+  COALESCE(oi.item_price, ip.price, 0)                            AS price,
   i.status,
   COALESCE(m.name, '')                                            AS manufacturer,
   COALESCE(s.name, '')                                            AS series_name,

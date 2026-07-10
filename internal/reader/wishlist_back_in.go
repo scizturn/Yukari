@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"time"
 
@@ -156,15 +157,20 @@ func (r WishlistBackInReader) Run(ctx context.Context, now time.Time) (int, erro
 		// series/category. It names the "Gas, nemenin..." section and seeds the
 		// recommendations. Recommendations = 6 most-popular items in that
 		// series/category; the section only renders with a full 6.
+		// The cross-sell section is decoration. One user's bad row must not abort
+		// the campaign for everyone queued behind them, so a failure here drops
+		// the section and the restock news still ships.
 		companion, err := r.store.WishlistBackInCompanion(ctx, user.ID)
 		if err != nil {
-			return enqueued, err
+			log.Printf("wishlist back in: companion lookup failed for user %s, sending without cross-sell: %v", user.ID, err)
+			companion = domain.WishlistBackInItem{}
 		}
 		var recos []domain.WishlistBackInItem
 		if companion.ID != "" {
 			recos, err = r.store.WishlistBackInRecommendations(ctx, user.ID, companion.ID)
 			if err != nil {
-				return enqueued, err
+				log.Printf("wishlist back in: reco lookup failed for user %s, sending without cross-sell: %v", user.ID, err)
+				recos = nil
 			}
 			if len(recos) < wishlistBackInRecoCount {
 				companion, recos = domain.WishlistBackInItem{}, nil

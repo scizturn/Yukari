@@ -2,6 +2,7 @@ package reader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -120,6 +121,7 @@ type fakeWishlistBackInStore struct {
 	companionUserIDs []string
 	gotStartAt       time.Time
 	gotEndAt         time.Time
+	companionErr     error
 }
 
 func (s *fakeWishlistBackInStore) WishlistBackInUserItems(_ context.Context, startAt, endAt time.Time) ([]domain.WishlistBackInUserItem, error) {
@@ -131,6 +133,9 @@ func (s *fakeWishlistBackInStore) WishlistBackInUserItems(_ context.Context, sta
 
 func (s *fakeWishlistBackInStore) WishlistBackInCompanion(_ context.Context, userID string) (domain.WishlistBackInItem, error) {
 	s.companionUserIDs = append(s.companionUserIDs, userID)
+	if s.companionErr != nil {
+		return domain.WishlistBackInItem{}, s.companionErr
+	}
 	return s.companion, nil
 }
 
@@ -267,5 +272,34 @@ func TestWishlistBackInWindowOverrideWidensTheSweep(t *testing.T) {
 	}
 	if want := time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC); !store.gotStartAt.Equal(want) {
 		t.Fatalf("window starts %s, want %s", store.gotStartAt, want)
+	}
+}
+
+func TestWishlistBackInStillSendsWhenCompanionLookupFails(t *testing.T) {
+	now := time.Date(2026, 7, 10, 9, 0, 0, 0, time.UTC)
+	userA := domain.User{ID: "1", Name: "A", Email: "a@example.test", IsActive: true}
+	userB := domain.User{ID: "2", Name: "B", Email: "b@example.test", IsActive: true}
+	store := &fakeWishlistBackInStore{
+		rows: []domain.WishlistBackInUserItem{
+			{User: userA, Item: domain.WishlistBackInItem{ID: "101", Name: "One"}},
+			{User: userB, Item: domain.WishlistBackInItem{ID: "102", Name: "Two"}},
+		},
+		// A single user's bad row (e.g. a NULL order_items.item_price) must not
+		// abort the campaign for everyone queued behind them.
+		companionErr: errors.New("sql: Scan error on column index 4, name \"price\""),
+	}
+	queue := &fakeWishlistBackInQueue{}
+
+	count, err := NewWishlistBackIn(store, queue, nil, nil, "q", "").Run(context.Background(), now)
+	if err != nil {
+		t.Fatalf("companion failure must not fail the run: %v", err)
+	}
+	if count != 2 || len(queue.jobs) != 2 {
+		t.Fatalf("expected both users enqueued, count=%d jobs=%d", count, len(queue.jobs))
+	}
+	for _, job := range queue.jobs {
+		if job.CompanionItem.ID != "" || len(job.RecoItems) != 0 {
+			t.Fatalf("expected cross-sell dropped, got companion=%q recos=%d", job.CompanionItem.ID, len(job.RecoItems))
+		}
 	}
 }
