@@ -129,7 +129,7 @@ func TestBirthdayItemQueriesShapeWishlistAndRecommendations(t *testing.T) {
 }
 
 func TestDiscountedWishlistFillOnlyIncludesActiveDiscounts(t *testing.T) {
-	query, err := NewLoader("../../data/sql").Read("discounted_wishlist_fill")
+	query, err := NewLoader("../../data/sql").Read("discounted_wishlist_fill_candidates")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestDiscountedWishlistFillOnlyIncludesActiveDiscounts(t *testing.T) {
 
 func TestDiscountedWishlistQueriesRequireSendableDiscounts(t *testing.T) {
 	loader := NewLoader("../../data/sql")
-	for _, name := range []string{"discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill"} {
+	for _, name := range []string{"discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill_candidates"} {
 		query, err := loader.Read(name)
 		if err != nil {
 			t.Fatal(err)
@@ -166,6 +166,100 @@ func TestDiscountedWishlistQueriesRequireSendableDiscounts(t *testing.T) {
 			}
 		}
 	}
+}
+
+// The whole point of splitting the fill into candidate + hydrate is that the candidate
+// scan carries neither the per-row image subquery nor the display joins. Reintroduce
+// either and the scan pays them for every item in the user's discounted series again,
+// which is the cost the split exists to remove.
+func TestDiscountedWishlistCandidateQueryStaysLightweight(t *testing.T) {
+	query, err := NewLoader("../../data/sql").Read("discounted_wishlist_fill_candidates")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check the statement, not the comments — the header explains the omissions by name.
+	stmt := stripSQLComments(query)
+	for _, unwanted := range []string{"FROM images", "manufactures", "LEFT JOIN series"} {
+		if strings.Contains(stmt, unwanted) {
+			t.Fatalf("candidate query must not contain %q — it ranks bare ids only, got %q", unwanted, stmt)
+		}
+	}
+	if !strings.Contains(compactSQL(stmt), "LIMIT 12") {
+		t.Fatalf("expected candidate query to cap the grid at LIMIT 12, got %q", stmt)
+	}
+}
+
+// The users query was flattened into staged subqueries so the cooldown NOT EXISTS runs
+// once per user instead of once per (user, item) pair. DiscountedWishlistUsers scans its
+// four columns positionally and passes exactly two params (now, now) — both survive the
+// rewrite only by accident unless pinned here.
+func TestDiscountedWishlistUsersKeepsItsScanContract(t *testing.T) {
+	query, err := NewLoader("../../data/sql").Read("discounted_wishlist_users")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stmt := stripSQLComments(query)
+
+	if got, want := selectList(t, stmt), "CAST(u.user_id AS CHAR) AS user_id, u.name, u.email, TRUE AS is_active"; got != want {
+		t.Fatalf("users query must project the scanned columns in order:\n got:  %s\n want: %s", got, want)
+	}
+	if got := strings.Count(stmt, "?"); got != 2 {
+		t.Fatalf("users query takes (now, now) — expected 2 placeholders, got %d", got)
+	}
+	// A single top-level SELECT DISTINCT is the shape the rewrite removed: it sorts wide
+	// rows per (user, item) and re-runs the cooldown check for each.
+	if strings.HasPrefix(strings.TrimSpace(compactSQL(stmt)), "SELECT DISTINCT") {
+		t.Fatalf("users query must not dedupe wide rows at the top level, got %q", stmt)
+	}
+}
+
+// stripSQLComments drops `--` line comments so an assertion about a query reads the
+// statement rather than the prose above it.
+func stripSQLComments(query string) string {
+	var kept []string
+	for _, line := range strings.Split(query, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "--") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
+// discountedWishlistRows scans both queries into the same struct, so the hydrate query
+// must project the same columns in the same order as the wishlisted-items query. A
+// column added to one and not the other is a scan error at run time, not compile time.
+func TestDiscountedWishlistHydrateMatchesItemsColumns(t *testing.T) {
+	loader := NewLoader("../../data/sql")
+	items, err := loader.Read("discounted_wishlist_items")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hydrate, err := loader.Read("discounted_wishlist_hydrate")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if selectList(t, items) != selectList(t, hydrate) {
+		t.Fatalf("hydrate SELECT list must match discounted_wishlist_items:\n items:   %s\n hydrate: %s",
+			selectList(t, items), selectList(t, hydrate))
+	}
+	if !strings.Contains(hydrate, "/*IDS*/") {
+		t.Fatalf("expected hydrate query to carry the /*IDS*/ IN-list token, got %q", hydrate)
+	}
+}
+
+// selectList returns the compacted text between SELECT and the first FROM.
+func selectList(t *testing.T, query string) string {
+	t.Helper()
+	compact := compactSQL(stripSQLComments(query))
+	start := strings.Index(compact, "SELECT ")
+	end := strings.Index(compact, " FROM ")
+	if start < 0 || end < 0 || end < start {
+		t.Fatalf("could not find a SELECT ... FROM in %q", query)
+	}
+	return compact[start+len("SELECT ") : end]
 }
 
 func compactSQL(query string) string {
