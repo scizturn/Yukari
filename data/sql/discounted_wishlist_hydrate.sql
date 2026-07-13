@@ -1,3 +1,16 @@
+-- Hydrate pemenang fill discounted-wishlist: dikasih ≤12 item id yang udah diranking
+-- discounted_wishlist_fill_candidates.sql, ambil kolom display lengkapnya. Cuma ~12
+-- baris, jadi subquery gambar per-baris — biaya yang sengaja dilewatin query kandidat
+-- — cuma jalan segelintir kali.
+--
+-- Token IN-list di bawah diganti jumlah `?` yang pas di Go (harus jadi satu-satunya
+-- token itu di file ini). IN nggak jaga urutan, jadi reader ngurutin ulang hasilnya
+-- balik ke urutan ranked id.
+--
+-- SENGAJA nggak ada filter diskon/sendability di sini — itu tugas query kandidat.
+-- Jangan panggil ini pakai id dari sumber lain.
+-- Kolom + urutannya harus sama persis dengan discounted_wishlist_items.sql: dua-duanya
+-- di-scan discountedWishlistRows.
 SELECT
   CAST(i.item_id AS CHAR)                                          AS id,
   i.name,
@@ -21,25 +34,4 @@ LEFT JOIN images     img ON img.image_id     = (
   ORDER BY sequence ASC, image_id ASC
   LIMIT 1
 )
-WHERE ip.series_id IN (
-  SELECT DISTINCT ip2.series_id
-  FROM wishlists     w2
-  JOIN items         i2  ON i2.item_id  = w2.item_id
-  JOIN item_products ip2 ON ip2.item_id = i2.item_id
-  WHERE w2.user_id           = ?
-    AND i2.discount_name     IS NOT NULL AND i2.discount_name != ''
-    AND i2.discount_end_date >= CURRENT_DATE
-)
-AND i.status        = 'ready'
-AND i.stock         > 0
-AND i.is_available  = 1
-AND COALESCE(i.isAdult, 0) = 0
-AND i.discount_name IS NOT NULL AND i.discount_name != ''
-AND i.discount_end_date >= CURRENT_DATE
-AND i.discount_price > 0
-AND i.discount_price < ip.price
-AND i.item_id NOT IN (
-  SELECT item_id FROM wishlists WHERE user_id = ?
-)
-ORDER BY i.view_count DESC, i.updated_at DESC
-LIMIT 12
+WHERE i.item_id IN (/*IDS*/)
