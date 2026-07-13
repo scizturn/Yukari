@@ -2,32 +2,29 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
-	"time"
 
 	"github.com/kyou-id/yukari/internal/config"
 	"github.com/kyou-id/yukari/internal/queue"
 	"github.com/kyou-id/yukari/internal/reader"
+	"github.com/kyou-id/yukari/internal/runreport"
 )
 
-func runLeftoverCart() {
-	ctx := context.Background()
+func runLeftoverCart(ctx context.Context, run *runreport.Run) error {
 	cfg := config.Load()
-
-	location, err := time.LoadLocation(cfg.Timezone)
-	if err != nil {
-		log.Fatalf("load timezone: %v", err)
-	}
-	now := time.Now().In(location)
+	now := run.StartedAt
+	run.QueueName = cfg.LeftoverCartQueueName
 
 	store, err := buildStore(cfg, now)
 	if err != nil {
-		log.Fatalf("build store: %v", err)
+		return fmt.Errorf("build store: %w", err)
 	}
 
 	lcStore, ok := store.(reader.LeftoverCartStore)
 	if !ok {
-		log.Fatal("store does not support leftover cart queries")
+		return errors.New("store does not support leftover cart queries")
 	}
 
 	redisQueue := queue.NewRedisQueue(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB, cfg.QueueName)
@@ -39,7 +36,7 @@ func runLeftoverCart() {
 
 	auditLogger, err := buildAuditLogger(cfg)
 	if err != nil {
-		log.Fatalf("build audit logger: %v", err)
+		return fmt.Errorf("build audit logger: %w", err)
 	}
 	if auditLogger != nil {
 		defer func() {
@@ -49,9 +46,7 @@ func runLeftoverCart() {
 		}()
 	}
 
-	count, err := reader.NewLeftoverCart(lcStore, redisQueue, auditLogger, cfg.LeftoverCartQueueName).Run(ctx, now)
-	if err != nil {
-		log.Fatalf("leftover cart reader failed: %v", err)
-	}
-	log.Printf("yukari enqueued %d leftover cart email job(s)", count)
+	count, err := reader.NewLeftoverCart(lcStore, redisQueue, run.Audit(auditLogger), cfg.LeftoverCartQueueName).Run(ctx, now)
+	run.Queued = count
+	return err
 }

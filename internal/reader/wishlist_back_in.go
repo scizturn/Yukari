@@ -121,8 +121,14 @@ func NewWishlistBackIn(store WishlistBackInStore, queue WishlistBackInQueue, vou
 	return WishlistBackInReader{store: store, queue: queue, vouchers: vouchers, audit: auditLogger, queueName: queueName, actionURL: actionURL}
 }
 
+// WishlistBackInRunsOn reports whether the wishlist-back-in reader does any work
+// on this date. See PoReadyRunsOn for why cmd/yukari needs to ask.
+func WishlistBackInRunsOn(now time.Time) bool {
+	return now.Weekday() == time.Friday
+}
+
 func (r WishlistBackInReader) Run(ctx context.Context, now time.Time) (int, error) {
-	if now.Weekday() != time.Friday {
+	if !WishlistBackInRunsOn(now) {
 		return 0, nil
 	}
 

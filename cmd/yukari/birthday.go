@@ -2,27 +2,23 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
-	"time"
 
 	"github.com/kyou-id/yukari/internal/config"
 	"github.com/kyou-id/yukari/internal/queue"
 	"github.com/kyou-id/yukari/internal/reader"
+	"github.com/kyou-id/yukari/internal/runreport"
 )
 
-func runBirthday() {
-	ctx := context.Background()
+func runBirthday(ctx context.Context, run *runreport.Run) error {
 	cfg := config.Load()
-
-	location, err := time.LoadLocation(cfg.Timezone)
-	if err != nil {
-		log.Fatalf("load timezone: %v", err)
-	}
-	now := time.Now().In(location)
+	now := run.StartedAt
+	run.QueueName = cfg.QueueName
 
 	store, err := buildStore(cfg, now)
 	if err != nil {
-		log.Fatalf("build store: %v", err)
+		return fmt.Errorf("build store: %w", err)
 	}
 
 	redisQueue := queue.NewRedisQueue(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB, cfg.QueueName)
@@ -32,13 +28,18 @@ func runBirthday() {
 		}
 	}()
 
-	voucherCreator, err := buildVoucherCreator(cfg)
+	vouchers, err := buildVoucherCreator(cfg)
 	if err != nil {
-		log.Fatalf("build voucher creator: %v", err)
+		return fmt.Errorf("build voucher creator: %w", err)
 	}
-	if voucherCreator != nil {
+	// Keep the interface nil when there is no creator. A nil *T assigned to an
+	// interface makes it non-nil, and the reader's `r.vouchers != nil` guard would
+	// then call straight into a nil receiver.
+	var voucherCreator reader.VoucherCreator
+	if vouchers != nil {
+		voucherCreator = vouchers
 		defer func() {
-			if err := voucherCreator.Close(); err != nil {
+			if err := vouchers.Close(); err != nil {
 				log.Printf("voucher db close failed: %v", err)
 			}
 		}()
@@ -46,7 +47,7 @@ func runBirthday() {
 
 	auditLogger, err := buildAuditLogger(cfg)
 	if err != nil {
-		log.Fatalf("build audit logger: %v", err)
+		return fmt.Errorf("build audit logger: %w", err)
 	}
 	if auditLogger != nil {
 		defer func() {
@@ -56,9 +57,7 @@ func runBirthday() {
 		}()
 	}
 
-	count, err := reader.NewWithVoucherCreatorAndAudit(store, redisQueue, voucherCreator, auditLogger, cfg.QueueName, cfg.ActionURL).Run(ctx, now)
-	if err != nil {
-		log.Fatalf("birthday reader failed: %v", err)
-	}
-	log.Printf("yukari enqueued %d birthday email job(s)", count)
+	count, err := reader.NewWithVoucherCreatorAndAudit(store, redisQueue, voucherCreator, run.Audit(auditLogger), cfg.QueueName, cfg.ActionURL).Run(ctx, now)
+	run.Queued = count
+	return err
 }

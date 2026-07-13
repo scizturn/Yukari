@@ -2,32 +2,29 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
-	"time"
 
 	"github.com/kyou-id/yukari/internal/config"
 	"github.com/kyou-id/yukari/internal/queue"
 	"github.com/kyou-id/yukari/internal/reader"
+	"github.com/kyou-id/yukari/internal/runreport"
 )
 
-func runWinback() {
-	ctx := context.Background()
+func runWinback(ctx context.Context, run *runreport.Run) error {
 	cfg := config.Load()
-
-	location, err := time.LoadLocation(cfg.Timezone)
-	if err != nil {
-		log.Fatalf("load timezone: %v", err)
-	}
-	now := time.Now().In(location)
+	now := run.StartedAt
+	run.QueueName = cfg.WinbackQueueName
 
 	store, err := buildStore(cfg, now)
 	if err != nil {
-		log.Fatalf("build store: %v", err)
+		return fmt.Errorf("build store: %w", err)
 	}
 
 	wbStore, ok := store.(reader.WinbackStore)
 	if !ok {
-		log.Fatal("store does not support winback queries")
+		return errors.New("store does not support winback queries")
 	}
 
 	redisQueue := queue.NewRedisQueue(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB, cfg.QueueName)
@@ -39,9 +36,12 @@ func runWinback() {
 
 	vouchers, err := buildWinbackVoucherCreator(cfg)
 	if err != nil {
-		log.Fatalf("build winback voucher creator: %v", err)
+		return fmt.Errorf("build winback voucher creator: %w", err)
 	}
+	// A nil *T in an interface is not nil — see runBirthday.
+	var voucherCreator reader.WinbackVoucherCreator
 	if vouchers != nil {
+		voucherCreator = vouchers
 		defer func() {
 			if err := vouchers.Close(); err != nil {
 				log.Printf("voucher db close failed: %v", err)
@@ -51,7 +51,7 @@ func runWinback() {
 
 	auditLogger, err := buildAuditLogger(cfg)
 	if err != nil {
-		log.Fatalf("build audit logger: %v", err)
+		return fmt.Errorf("build audit logger: %w", err)
 	}
 	if auditLogger != nil {
 		defer func() {
@@ -61,9 +61,7 @@ func runWinback() {
 		}()
 	}
 
-	count, err := reader.NewWinback(wbStore, redisQueue, vouchers, auditLogger, cfg.WinbackQueueName, cfg.ActionURL).Run(ctx, now)
-	if err != nil {
-		log.Fatalf("winback reader failed: %v", err)
-	}
-	log.Printf("yukari enqueued %d winback email job(s)", count)
+	count, err := reader.NewWinback(wbStore, redisQueue, voucherCreator, run.Audit(auditLogger), cfg.WinbackQueueName, cfg.ActionURL).Run(ctx, now)
+	run.Queued = count
+	return err
 }

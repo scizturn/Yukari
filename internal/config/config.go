@@ -33,6 +33,11 @@ type Config struct {
 	// the reader picked: the 8% tier (GP >= 35) or the 6% tier (GP >= 25).
 	WishlistBackInVoucherConfigPath    string
 	WishlistBackInLowVoucherConfigPath string
+
+	// Same two vars Makoto reads, on purpose: one webhook URL in Coolify lights up
+	// both the per-email logs (Makoto) and the per-cron-run summary (Yukari).
+	DiscordWebhookURL string
+	DiscordEnabled    bool
 }
 
 func Load() Config {
@@ -59,6 +64,8 @@ func Load() Config {
 		PoReadyQueueName:                env("YUKARI_PO_READY_QUEUE_NAME", "po_ready_email_jobs"),
 		WishlistBackInVoucherConfigPath:    env("YUKARI_WISHLIST_BACK_IN_VOUCHER_CONFIG", "data/vouchers/wishlist_back_in.json"),
 		WishlistBackInLowVoucherConfigPath: env("YUKARI_WISHLIST_BACK_IN_LOW_VOUCHER_CONFIG", "data/vouchers/wishlist_back_in_low.json"),
+		DiscordWebhookURL:                  os.Getenv("DISCORD_WEBHOOK_URL"),
+		DiscordEnabled:                     envBool("DISCORD_WEBHOOK_ENABLED", true),
 	}
 }
 

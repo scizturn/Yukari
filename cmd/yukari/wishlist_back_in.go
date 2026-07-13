@@ -2,37 +2,42 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"time"
 
 	"github.com/kyou-id/yukari/internal/config"
 	"github.com/kyou-id/yukari/internal/queue"
 	"github.com/kyou-id/yukari/internal/reader"
+	"github.com/kyou-id/yukari/internal/runreport"
 )
 
-func runWishlistBackIn() {
-	ctx := context.Background()
+func runWishlistBackIn(ctx context.Context, run *runreport.Run) error {
 	cfg := config.Load()
-	location, err := time.LoadLocation(cfg.Timezone)
-	if err != nil {
-		log.Fatalf("load timezone: %v", err)
+	now := run.StartedAt
+	run.QueueName = cfg.WishlistBackInQueueName
+	// See runPoReady: the reader's own Friday guard still decides, this just skips
+	// opening connections a stand-down run never uses.
+	if !reader.WishlistBackInRunsOn(now) {
+		run.Note = fmt.Sprintf("wishlist-back-in reader only runs on Friday (today is %s)", now.Weekday())
+		return nil
 	}
-	now := time.Now().In(location)
 
 	store, err := buildStore(cfg, now)
 	if err != nil {
-		log.Fatalf("build store: %v", err)
+		return fmt.Errorf("build store: %w", err)
 	}
 	wbiStore, ok := store.(reader.WishlistBackInStore)
 	if !ok {
-		log.Fatal("store does not support wishlist back in queries")
+		return errors.New("store does not support wishlist back in queries")
 	}
 
 	redisQueue := queue.NewRedisQueue(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB, cfg.QueueName)
 	defer redisQueue.Close()
 	vouchers, err := buildWishlistBackInVoucherCreator(cfg)
 	if err != nil {
-		log.Fatalf("build wishlist back in voucher creator: %v", err)
+		return fmt.Errorf("build wishlist back in voucher creator: %w", err)
 	}
 	// Keep the interface nil when there is no creator. Assigning a nil *T to an
 	// interface makes it non-nil, and the reader's `r.vouchers != nil` guard would
@@ -44,21 +49,19 @@ func runWishlistBackIn() {
 	}
 	auditLogger, err := buildAuditLogger(cfg)
 	if err != nil {
-		log.Fatalf("build audit logger: %v", err)
+		return fmt.Errorf("build audit logger: %w", err)
 	}
 	if auditLogger != nil {
 		defer auditLogger.Close()
 	}
 
-	wbiReader := reader.NewWishlistBackIn(wbiStore, redisQueue, voucherCreator, auditLogger, cfg.WishlistBackInQueueName, cfg.ActionURL)
+	wbiReader := reader.NewWishlistBackIn(wbiStore, redisQueue, voucherCreator, run.Audit(auditLogger), cfg.WishlistBackInQueueName, cfg.ActionURL)
 	if days := cfg.WishlistBackInWindowDays; days > 0 {
 		wbiReader.Window = time.Duration(days) * 24 * time.Hour
 		log.Printf("wishlist back in detection window: %d day(s)", days)
 	}
 
 	count, err := wbiReader.Run(ctx, now)
-	if err != nil {
-		log.Fatalf("wishlist back in reader failed: %v", err)
-	}
-	log.Printf("yukari enqueued %d wishlist back in email job(s)", count)
+	run.Queued = count
+	return err
 }

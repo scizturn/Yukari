@@ -30,6 +30,14 @@ const poReadyMaxItems = 5
 // A skipped run therefore loses that week permanently — Yukari has no catch-up.
 const poReadyWindow = 7 * 24 * time.Hour
 
+// PoReadyRunsOn reports whether the po-ready reader does any work on this date.
+// Run holds the authority over the cadence; cmd/yukari asks through this so the
+// cron report can say "skipped, not Saturday" instead of "0 jobs queued" — two
+// outcomes that look identical from outside and hide a cron on the wrong day.
+func PoReadyRunsOn(now time.Time) bool {
+	return now.Weekday() == time.Saturday
+}
+
 type PoReadyStore interface {
 	PoReadyUserItems(ctx context.Context, startAt, endAt time.Time) ([]domain.PoReadyUserItem, error)
 }
@@ -66,7 +74,7 @@ func (r PoReadyReader) Run(ctx context.Context, now time.Time) (int, error) {
 	// the item to po-ready, a 0->>0 restock row sends it to wishlist-back-in, and
 	// wishlist-back-in explicitly stands down on items po-ready is about to claim.
 	// Do not reintroduce a dependency on which cron fires first.
-	if now.Weekday() != time.Saturday {
+	if !PoReadyRunsOn(now) {
 		return 0, nil
 	}
 

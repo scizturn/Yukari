@@ -2,13 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
-	"time"
 
 	"github.com/kyou-id/yukari/internal/config"
 	"github.com/kyou-id/yukari/internal/domain"
 	"github.com/kyou-id/yukari/internal/queue"
 	"github.com/kyou-id/yukari/internal/reader"
+	"github.com/kyou-id/yukari/internal/runreport"
 )
 
 type anniversaryQueueAdapter struct {
@@ -20,24 +22,19 @@ func (a anniversaryQueueAdapter) EnqueueAnniversary(ctx context.Context, job dom
 	return a.queue.EnqueueAnniversaryTo(ctx, a.queueName, job)
 }
 
-func runAnniversary() {
-	ctx := context.Background()
+func runAnniversary(ctx context.Context, run *runreport.Run) error {
 	cfg := config.Load()
-
-	location, err := time.LoadLocation(cfg.Timezone)
-	if err != nil {
-		log.Fatalf("load timezone: %v", err)
-	}
-	now := time.Now().In(location)
+	now := run.StartedAt
+	run.QueueName = cfg.AnniversaryQueueName
 
 	store, err := buildStore(cfg, now)
 	if err != nil {
-		log.Fatalf("build store: %v", err)
+		return fmt.Errorf("build store: %w", err)
 	}
 
 	anniversaryStore, ok := store.(reader.AnniversaryStore)
 	if !ok {
-		log.Fatal("store does not support anniversary queries")
+		return errors.New("store does not support anniversary queries")
 	}
 
 	redisQueue := queue.NewRedisQueue(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB, cfg.QueueName)
@@ -47,13 +44,16 @@ func runAnniversary() {
 		}
 	}()
 
-	anniversaryVoucherCreator, err := buildAnniversaryVoucherCreator(cfg)
+	vouchers, err := buildAnniversaryVoucherCreator(cfg)
 	if err != nil {
-		log.Fatalf("build anniversary voucher creator: %v", err)
+		return fmt.Errorf("build anniversary voucher creator: %w", err)
 	}
-	if anniversaryVoucherCreator != nil {
+	// A nil *T in an interface is not nil — see runBirthday.
+	var anniversaryVoucherCreator reader.AnniversaryVoucherCreator
+	if vouchers != nil {
+		anniversaryVoucherCreator = vouchers
 		defer func() {
-			if err := anniversaryVoucherCreator.Close(); err != nil {
+			if err := vouchers.Close(); err != nil {
 				log.Printf("anniversary voucher db close failed: %v", err)
 			}
 		}()
@@ -61,7 +61,7 @@ func runAnniversary() {
 
 	auditLogger, err := buildAuditLogger(cfg)
 	if err != nil {
-		log.Fatalf("build audit logger: %v", err)
+		return fmt.Errorf("build audit logger: %w", err)
 	}
 	if auditLogger != nil {
 		defer func() {
@@ -72,9 +72,7 @@ func runAnniversary() {
 	}
 
 	annivQueue := anniversaryQueueAdapter{queue: redisQueue, queueName: cfg.AnniversaryQueueName}
-	count, err := reader.NewAnniversary(anniversaryStore, annivQueue, anniversaryVoucherCreator, auditLogger, cfg.AnniversaryQueueName, cfg.ActionURL).Run(ctx, now)
-	if err != nil {
-		log.Fatalf("anniversary reader failed: %v", err)
-	}
-	log.Printf("yukari enqueued %d anniversary email job(s)", count)
+	count, err := reader.NewAnniversary(anniversaryStore, annivQueue, anniversaryVoucherCreator, run.Audit(auditLogger), cfg.AnniversaryQueueName, cfg.ActionURL).Run(ctx, now)
+	run.Queued = count
+	return err
 }

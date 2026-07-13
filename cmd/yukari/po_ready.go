@@ -2,32 +2,36 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
-	"time"
 
 	"github.com/kyou-id/yukari/internal/config"
 	"github.com/kyou-id/yukari/internal/queue"
 	"github.com/kyou-id/yukari/internal/reader"
+	"github.com/kyou-id/yukari/internal/runreport"
 )
 
-func runPoReady() {
-	ctx := context.Background()
+func runPoReady(ctx context.Context, run *runreport.Run) error {
 	cfg := config.Load()
-
-	location, err := time.LoadLocation(cfg.Timezone)
-	if err != nil {
-		log.Fatalf("load timezone: %v", err)
+	now := run.StartedAt
+	run.QueueName = cfg.PoReadyQueueName
+	// The reader stands down on its own (that guard is the authority on the
+	// cadence); returning here just spares the run a MySQL and a Redis connection
+	// it would never use.
+	if !reader.PoReadyRunsOn(now) {
+		run.Note = fmt.Sprintf("po-ready reader only runs on Saturday (today is %s)", now.Weekday())
+		return nil
 	}
-	now := time.Now().In(location)
 
 	store, err := buildStore(cfg, now)
 	if err != nil {
-		log.Fatalf("build store: %v", err)
+		return fmt.Errorf("build store: %w", err)
 	}
 
 	prStore, ok := store.(reader.PoReadyStore)
 	if !ok {
-		log.Fatal("store does not support po ready queries")
+		return errors.New("store does not support po ready queries")
 	}
 
 	redisQueue := queue.NewRedisQueue(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB, cfg.QueueName)
@@ -39,7 +43,7 @@ func runPoReady() {
 
 	auditLogger, err := buildAuditLogger(cfg)
 	if err != nil {
-		log.Fatalf("build audit logger: %v", err)
+		return fmt.Errorf("build audit logger: %w", err)
 	}
 	if auditLogger != nil {
 		defer func() {
@@ -49,9 +53,7 @@ func runPoReady() {
 		}()
 	}
 
-	count, err := reader.NewPoReady(prStore, redisQueue, auditLogger, cfg.PoReadyQueueName).Run(ctx, now)
-	if err != nil {
-		log.Fatalf("po ready reader failed: %v", err)
-	}
-	log.Printf("yukari enqueued %d po ready email job(s)", count)
+	count, err := reader.NewPoReady(prStore, redisQueue, run.Audit(auditLogger), cfg.PoReadyQueueName).Run(ctx, now)
+	run.Queued = count
+	return err
 }
