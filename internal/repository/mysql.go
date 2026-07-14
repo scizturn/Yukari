@@ -30,7 +30,7 @@ func OpenMySQLStore(dsn string, loader sqlfiles.Loader) (*MySQLStore, error) {
 }
 
 func NewMySQLStore(db *sql.DB, loader sqlfiles.Loader) (*MySQLStore, error) {
-	names := []string{"birthday_users", "wishlist_items", "wishlist_items_winback", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill_candidates", "discounted_wishlist_hydrate", "winback_users", "winback_fill_items", "wishlist_back_in_user_items", "wishlist_back_in_companion", "wishlist_back_in_reco", "wishlist_back_in_reco_category", "wishlist_back_in_reco_scores", "wishlist_back_in_reco_hydrate", "wishlist_back_in_forced_items", "po_ready_user_items", "po_ready_forced_items"}
+	names := []string{"birthday_users", "wishlist_items", "wishlist_items_winback", "wishlist_items_anniversary", "fyp_items", "popular_items", "user_converted", "anniversary_users", "historical_orders", "leftover_cart_users", "leftover_cart_items", "leftover_cart_reco", "discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill_pool", "discounted_wishlist_fill_series", "discounted_wishlist_fill_owned", "winback_users", "winback_fill_items", "wishlist_back_in_user_items", "wishlist_back_in_companion", "wishlist_back_in_reco", "wishlist_back_in_reco_category", "wishlist_back_in_reco_scores", "wishlist_back_in_reco_hydrate", "wishlist_back_in_forced_items", "po_ready_user_items", "po_ready_forced_items"}
 	queries := make(map[string]string, len(names))
 	for _, name := range names {
 		query, err := loader.Read(name)
@@ -247,67 +247,168 @@ func (s *MySQLStore) DiscountedWishlistItems(ctx context.Context, userID string)
 	return s.discountedWishlistRows(ctx, s.queries["discounted_wishlist_items"], true, userID)
 }
 
-// DiscountedWishlistFill picks the fill grid in two phases: a lightweight candidate
-// query that ranks bare ids, then a hydrate of only the winners. Pulling full display
-// rows — with a per-row image subquery — for every candidate in the user's discounted
-// series was the per-user cost, since the joins run before ORDER BY/LIMIT. Same trade
-// as WishlistBackInRecommendations; see wishlist_back_in_reco.sql.
-func (s *MySQLStore) DiscountedWishlistFill(ctx context.Context, userID string) ([]domain.DiscountedWishlistItem, error) {
-	ids, err := s.discountedWishlistFillCandidates(ctx, userID)
+// discountedWishlistFillLimit is the size of the fill grid — the LIMIT the old per-user
+// fill query carried.
+const discountedWishlistFillLimit = 12
+
+// discountedFillCandidate is a pool row plus the columns the per-user ranking needs but
+// the email does not show.
+type discountedFillCandidate struct {
+	item      domain.DiscountedWishlistItem
+	seriesID  int64
+	viewCount int64
+	updatedAt time.Time
+}
+
+// DiscountedWishlistFiller serves the fill grid for any user out of memory.
+type DiscountedWishlistFiller struct {
+	bySeries map[int64][]discountedFillCandidate
+	series   map[string][]int64
+	owned    map[string]map[string]struct{}
+}
+
+// DiscountedWishlistFillIndex loads the whole fill grid in three queries, once per run.
+//
+// The old shape ran one query per user. On 13 Jul 2026 that was 32,771 users — 32,771
+// executions of a query whose candidate set barely differs between them. The candidates
+// are in fact identical for everyone: every buyable discounted item. Only two things are
+// per-user, and both are cheap set operations: which series the user cares about, and
+// which of those items they already wishlist. So pull the pool once and do the rest in
+// memory.
+//
+// Ranking is re-done per user (Fill) rather than baked into the pool order, because an
+// item can be reached through more than one of a user's series.
+func (s *MySQLStore) DiscountedWishlistFillIndex(ctx context.Context) (*DiscountedWishlistFiller, error) {
+	pool, err := s.discountedWishlistFillPool(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return s.discountedWishlistHydrate(ctx, ids)
+	series, err := s.discountedWishlistFillSeries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	owned, err := s.discountedWishlistFillOwned(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	bySeries := make(map[int64][]discountedFillCandidate, len(pool))
+	for _, c := range pool {
+		bySeries[c.seriesID] = append(bySeries[c.seriesID], c)
+	}
+	return &DiscountedWishlistFiller{bySeries: bySeries, series: series, owned: owned}, nil
 }
 
-func (s *MySQLStore) discountedWishlistFillCandidates(ctx context.Context, userID string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, s.queries["discounted_wishlist_fill_candidates"], userID, userID)
+// Fill returns the user's fill grid: buyable discounted items from the series they care
+// about, minus the ones already on their wishlist, ranked and capped.
+//
+// The ranking mirrors the old SQL's `ORDER BY i.view_count DESC, i.updated_at DESC` and
+// then adds item id as a final tiebreak. MySQL left ties unordered, so this is stricter
+// than what it replaced, not different: a run is now reproducible.
+func (f *DiscountedWishlistFiller) Fill(userID string) []domain.DiscountedWishlistItem {
+	seriesIDs := f.series[userID]
+	if len(seriesIDs) == 0 {
+		return nil
+	}
+	owned := f.owned[userID]
+
+	var cands []discountedFillCandidate
+	for _, seriesID := range seriesIDs {
+		for _, c := range f.bySeries[seriesID] {
+			if _, ok := owned[c.item.ID]; ok {
+				continue
+			}
+			cands = append(cands, c)
+		}
+	}
+	sort.SliceStable(cands, func(a, b int) bool {
+		if cands[a].viewCount != cands[b].viewCount {
+			return cands[a].viewCount > cands[b].viewCount
+		}
+		if !cands[a].updatedAt.Equal(cands[b].updatedAt) {
+			return cands[a].updatedAt.After(cands[b].updatedAt)
+		}
+		return cands[a].item.ID < cands[b].item.ID
+	})
+	if len(cands) > discountedWishlistFillLimit {
+		cands = cands[:discountedWishlistFillLimit]
+	}
+
+	items := make([]domain.DiscountedWishlistItem, 0, len(cands))
+	for _, c := range cands {
+		items = append(items, c.item)
+	}
+	return items
+}
+
+func (s *MySQLStore) discountedWishlistFillPool(ctx context.Context) ([]discountedFillCandidate, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["discounted_wishlist_fill_pool"])
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var ids []string
+	var pool []discountedFillCandidate
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var c discountedFillCandidate
+		var discountPrice sql.NullInt64
+		var discountName sql.NullString
+		var discountEnd sql.NullTime
+		if err := rows.Scan(
+			&c.item.ID, &c.item.Name, &c.item.CharacterName, &c.item.URL, &c.item.ImageURL,
+			&c.item.OriginalPrice, &discountPrice, &discountName, &discountEnd, &c.item.Status,
+			&c.item.Manufacturer, &c.item.SeriesName,
+			&c.seriesID, &c.viewCount, &c.updatedAt,
+		); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		c.item.DiscountPrice = int(discountPrice.Int64)
+		c.item.DiscountName = discountName.String
+		c.item.DiscountEnd = timePtr(discountEnd)
+		c.item.IsWishlisted = false
+		pool = append(pool, c)
 	}
-	return ids, rows.Err()
+	return pool, rows.Err()
 }
 
-// discountedWishlistHydrate fetches full display columns for the ranked ids and returns
-// them IN THAT ORDER (SQL IN does not preserve order, so we reindex).
-func (s *MySQLStore) discountedWishlistHydrate(ctx context.Context, ids []string) ([]domain.DiscountedWishlistItem, error) {
-	if len(ids) == 0 {
-		return nil, nil
-	}
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
-	// ReplaceAll (not Replace, 1): the token must not survive anywhere, or a stray
-	// `/*IDS*/` would parse as an empty comment and break the IN list.
-	query := strings.ReplaceAll(s.queries["discounted_wishlist_hydrate"], "/*IDS*/", placeholders)
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		args[i] = id
-	}
-	items, err := s.discountedWishlistRows(ctx, query, false, args...)
+func (s *MySQLStore) discountedWishlistFillSeries(ctx context.Context) (map[string][]int64, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["discounted_wishlist_fill_series"])
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
-	byID := make(map[string]domain.DiscountedWishlistItem, len(items))
-	for _, item := range items {
-		byID[item.ID] = item
-	}
-	ordered := make([]domain.DiscountedWishlistItem, 0, len(ids))
-	for _, id := range ids {
-		if item, ok := byID[id]; ok {
-			ordered = append(ordered, item)
+	series := make(map[string][]int64)
+	for rows.Next() {
+		var userID string
+		var seriesID int64
+		if err := rows.Scan(&userID, &seriesID); err != nil {
+			return nil, err
 		}
+		series[userID] = append(series[userID], seriesID)
 	}
-	return ordered, nil
+	return series, rows.Err()
+}
+
+func (s *MySQLStore) discountedWishlistFillOwned(ctx context.Context) (map[string]map[string]struct{}, error) {
+	rows, err := s.db.QueryContext(ctx, s.queries["discounted_wishlist_fill_owned"])
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	owned := make(map[string]map[string]struct{})
+	for rows.Next() {
+		var userID, itemID string
+		if err := rows.Scan(&userID, &itemID); err != nil {
+			return nil, err
+		}
+		if owned[userID] == nil {
+			owned[userID] = make(map[string]struct{})
+		}
+		owned[userID][itemID] = struct{}{}
+	}
+	return owned, rows.Err()
 }
 
 func (s *MySQLStore) discountedWishlistRows(ctx context.Context, query string, isWishlisted bool, args ...any) ([]domain.DiscountedWishlistItem, error) {

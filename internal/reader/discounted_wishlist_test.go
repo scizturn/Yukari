@@ -76,10 +76,36 @@ func TestDiscountedWishlistReaderSkipsUserWithoutItems(t *testing.T) {
 	}
 }
 
+// The point of the fill index is that it is built once per run, not once per user. A
+// regression here is invisible in the output — the emails come out identical — and only
+// shows up as 32k extra queries against prod.
+func TestDiscountedWishlistReaderBuildsTheFillIndexOnce(t *testing.T) {
+	now := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
+	store := &discountedWishlistStoreStub{
+		users: []domain.User{
+			{ID: "1", Email: "a@example.test", IsActive: true},
+			{ID: "2", Email: "b@example.test", IsActive: true},
+			{ID: "3", Email: "c@example.test", IsActive: true},
+		},
+		wishlisted: []domain.DiscountedWishlistItem{{ID: "wish-1", IsWishlisted: true}},
+		fill:       []domain.DiscountedWishlistItem{{ID: "fill-1"}},
+	}
+
+	count, err := NewDiscountedWishlist(store, &discountedWishlistQueueStub{}, &discountedWishlistAuditStub{}, "q").
+		Run(context.Background(), now)
+	if err != nil || count != 3 {
+		t.Fatalf("expected three jobs, count=%d err=%v", count, err)
+	}
+	if store.fillIndexBuilds != 1 {
+		t.Fatalf("fill index must be built once for the whole run, got %d builds for 3 users", store.fillIndexBuilds)
+	}
+}
+
 type discountedWishlistStoreStub struct {
-	users      []domain.User
-	wishlisted []domain.DiscountedWishlistItem
-	fill       []domain.DiscountedWishlistItem
+	users           []domain.User
+	wishlisted      []domain.DiscountedWishlistItem
+	fill            []domain.DiscountedWishlistItem
+	fillIndexBuilds int
 }
 
 func (s *discountedWishlistStoreStub) DiscountedWishlistUsers(context.Context, time.Time) ([]domain.User, error) {
@@ -88,8 +114,17 @@ func (s *discountedWishlistStoreStub) DiscountedWishlistUsers(context.Context, t
 func (s *discountedWishlistStoreStub) DiscountedWishlistItems(context.Context, string) ([]domain.DiscountedWishlistItem, error) {
 	return s.wishlisted, nil
 }
-func (s *discountedWishlistStoreStub) DiscountedWishlistFill(context.Context, string) ([]domain.DiscountedWishlistItem, error) {
-	return s.fill, nil
+func (s *discountedWishlistStoreStub) DiscountedWishlistFillIndex(context.Context) (DiscountedWishlistFiller, error) {
+	s.fillIndexBuilds++
+	return discountedWishlistFillerStub{fill: s.fill}, nil
+}
+
+type discountedWishlistFillerStub struct {
+	fill []domain.DiscountedWishlistItem
+}
+
+func (f discountedWishlistFillerStub) Fill(string) []domain.DiscountedWishlistItem {
+	return f.fill
 }
 
 type discountedWishlistQueueStub struct {

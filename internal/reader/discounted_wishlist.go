@@ -13,7 +13,14 @@ import (
 type DiscountedWishlistStore interface {
 	DiscountedWishlistUsers(ctx context.Context, now time.Time) ([]domain.User, error)
 	DiscountedWishlistItems(ctx context.Context, userID string) ([]domain.DiscountedWishlistItem, error)
-	DiscountedWishlistFill(ctx context.Context, userID string) ([]domain.DiscountedWishlistItem, error)
+	DiscountedWishlistFillIndex(ctx context.Context) (DiscountedWishlistFiller, error)
+}
+
+// DiscountedWishlistFiller serves the fill grid for a user without touching the DB. It is
+// built once per run; the fill candidates are the same for everyone, so asking the DB per
+// user recomputed one answer 32,771 times on the 13 Jul 2026 run.
+type DiscountedWishlistFiller interface {
+	Fill(userID string) []domain.DiscountedWishlistItem
 }
 
 type DiscountedWishlistQueue interface {
@@ -43,6 +50,12 @@ func (r DiscountedWishlistReader) Run(ctx context.Context, now time.Time) (int, 
 		return 0, err
 	}
 
+	// Built once, before the loop: every user's fill grid is drawn from the same pool.
+	filler, err := r.store.DiscountedWishlistFillIndex(ctx)
+	if err != nil {
+		return 0, err
+	}
+
 	enqueued := 0
 	for _, user := range users {
 		wishlisted, err := r.store.DiscountedWishlistItems(ctx, user.ID)
@@ -56,10 +69,7 @@ func (r DiscountedWishlistReader) Run(ctx context.Context, now time.Time) (int, 
 			continue
 		}
 
-		fill, err := r.store.DiscountedWishlistFill(ctx, user.ID)
-		if err != nil {
-			return enqueued, err
-		}
+		fill := filler.Fill(user.ID)
 
 		items := append(wishlisted, fill...)
 
