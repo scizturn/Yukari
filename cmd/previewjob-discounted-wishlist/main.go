@@ -48,10 +48,11 @@ func main() {
 		log.Fatalf("read discounted wishlist items: %v", err)
 	}
 
-	fill, err := store.DiscountedWishlistFill(ctx, user.ID)
+	filler, err := store.DiscountedWishlistFillIndex(ctx)
 	if err != nil {
 		log.Fatalf("read discounted wishlist fill items: %v", err)
 	}
+	fill := filler.Fill(user.ID)
 
 	items := append(wishlisted, fill...)
 	job := domain.DiscountedWishlistJob{

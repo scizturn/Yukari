@@ -129,7 +129,7 @@ func TestBirthdayItemQueriesShapeWishlistAndRecommendations(t *testing.T) {
 }
 
 func TestDiscountedWishlistFillOnlyIncludesActiveDiscounts(t *testing.T) {
-	query, err := NewLoader("../../data/sql").Read("discounted_wishlist_fill_candidates")
+	query, err := NewLoader("../../data/sql").Read("discounted_wishlist_fill_pool")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,14 +141,14 @@ func TestDiscountedWishlistFillOnlyIncludesActiveDiscounts(t *testing.T) {
 		"i.discount_price < ip.price",
 	} {
 		if !strings.Contains(query, want) {
-			t.Fatalf("expected discounted wishlist fill query to contain %q, got %q", want, query)
+			t.Fatalf("expected discounted wishlist fill pool to contain %q, got %q", want, query)
 		}
 	}
 }
 
 func TestDiscountedWishlistQueriesRequireSendableDiscounts(t *testing.T) {
 	loader := NewLoader("../../data/sql")
-	for _, name := range []string{"discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill_candidates"} {
+	for _, name := range []string{"discounted_wishlist_users", "discounted_wishlist_items", "discounted_wishlist_fill_pool", "discounted_wishlist_fill_owned"} {
 		query, err := loader.Read(name)
 		if err != nil {
 			t.Fatal(err)
@@ -168,25 +168,62 @@ func TestDiscountedWishlistQueriesRequireSendableDiscounts(t *testing.T) {
 	}
 }
 
-// The whole point of splitting the fill into candidate + hydrate is that the candidate
-// scan carries neither the per-row image subquery nor the display joins. Reintroduce
-// either and the scan pays them for every item in the user's discounted series again,
-// which is the cost the split exists to remove.
-func TestDiscountedWishlistCandidateQueryStaysLightweight(t *testing.T) {
-	query, err := NewLoader("../../data/sql").Read("discounted_wishlist_fill_candidates")
+// The three fill queries are run-wide: they take no user id, which is exactly what lets
+// them run once instead of once per user. A `?` creeping into any of them means someone
+// has reintroduced the per-user shape — 32,771 executions on the 13 Jul 2026 run — and no
+// test that checks the emails would notice, because the output is identical.
+func TestDiscountedWishlistFillQueriesArePerRunNotPerUser(t *testing.T) {
+	loader := NewLoader("../../data/sql")
+	for _, name := range []string{
+		"discounted_wishlist_fill_pool",
+		"discounted_wishlist_fill_series",
+		"discounted_wishlist_fill_owned",
+	} {
+		query, err := loader.Read(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Count(stripSQLComments(query), "?"); got != 0 {
+			t.Fatalf("%s must take no parameters — it is loaded once per run, got %d placeholders", name, got)
+		}
+	}
+}
+
+// The pool is scanned into DiscountedWishlistItem plus the three ranking columns, so its
+// SELECT list must be the items query's columns followed by series_id, view_count and
+// updated_at — in that order. Positional scan: a reordering fails at run time, not build.
+func TestDiscountedWishlistFillPoolMatchesItemsColumnsPlusRankingKeys(t *testing.T) {
+	loader := NewLoader("../../data/sql")
+	items, err := loader.Read("discounted_wishlist_items")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := loader.Read("discounted_wishlist_fill_pool")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Check the statement, not the comments — the header explains the omissions by name.
-	stmt := stripSQLComments(query)
-	for _, unwanted := range []string{"FROM images", "manufactures", "LEFT JOIN series"} {
-		if strings.Contains(stmt, unwanted) {
-			t.Fatalf("candidate query must not contain %q — it ranks bare ids only, got %q", unwanted, stmt)
-		}
+	want := selectList(t, items) + ", ip.series_id AS series_id, COALESCE(i.view_count, 0) AS view_count, COALESCE(i.updated_at, i.created_at, CURRENT_TIMESTAMP) AS updated_at"
+	if got := selectList(t, pool); got != want {
+		t.Fatalf("pool SELECT list must be the items columns plus the ranking keys:\n got:  %s\n want: %s", got, want)
 	}
-	if !strings.Contains(compactSQL(stmt), "LIMIT 12") {
-		t.Fatalf("expected candidate query to cap the grid at LIMIT 12, got %q", stmt)
+}
+
+// The series lookup deliberately does NOT filter on stock/status/price, matching the old
+// fill query: an out-of-stock discounted wishlist item still contributes its series to the
+// recommendations. Tightening it here would silently shrink some users' grids. Whether
+// that looseness was intended is an open product question — see the file's header.
+func TestDiscountedWishlistFillSeriesKeepsTheLooseFilter(t *testing.T) {
+	query, err := NewLoader("../../data/sql").Read("discounted_wishlist_fill_series")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stmt := compactSQL(stripSQLComments(query))
+
+	for _, unwanted := range []string{"i.stock > 0", "i.status = 'ready'", "i.is_available = 1", "i.discount_price"} {
+		if strings.Contains(stmt, compactSQL(unwanted)) {
+			t.Fatalf("series lookup must stay loose to preserve the old behaviour; found %q in %q", unwanted, stmt)
+		}
 	}
 }
 
@@ -227,28 +264,6 @@ func stripSQLComments(query string) string {
 	return strings.Join(kept, "\n")
 }
 
-// discountedWishlistRows scans both queries into the same struct, so the hydrate query
-// must project the same columns in the same order as the wishlisted-items query. A
-// column added to one and not the other is a scan error at run time, not compile time.
-func TestDiscountedWishlistHydrateMatchesItemsColumns(t *testing.T) {
-	loader := NewLoader("../../data/sql")
-	items, err := loader.Read("discounted_wishlist_items")
-	if err != nil {
-		t.Fatal(err)
-	}
-	hydrate, err := loader.Read("discounted_wishlist_hydrate")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if selectList(t, items) != selectList(t, hydrate) {
-		t.Fatalf("hydrate SELECT list must match discounted_wishlist_items:\n items:   %s\n hydrate: %s",
-			selectList(t, items), selectList(t, hydrate))
-	}
-	if !strings.Contains(hydrate, "/*IDS*/") {
-		t.Fatalf("expected hydrate query to carry the /*IDS*/ IN-list token, got %q", hydrate)
-	}
-}
 
 // selectList returns the compacted text between SELECT and the first FROM.
 func selectList(t *testing.T, query string) string {
